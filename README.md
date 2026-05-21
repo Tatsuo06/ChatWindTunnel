@@ -10,6 +10,10 @@ Upload a CAD file, configure the simulation through natural language chat, submi
 
 ---
 
+## Screenshots
+
+![Login screen](frontend/static/login.png)
+
 ## Features
 
 - **Chat-driven setup** — set wind speed, yaw/pitch/roll angles, and create parameter sweeps via natural language (powered by LiteLLM, compatible with LM Studio, Claude, OpenAI)
