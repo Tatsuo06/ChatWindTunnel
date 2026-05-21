@@ -16,5 +16,4 @@ data/*.db
 *.stp
 *.igs
 .DS_Store
-foam_templates/
 .claude/
