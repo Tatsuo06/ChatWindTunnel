@@ -154,9 +154,7 @@ LLM_API_KEY=sk-...
 
 ## OpenFOAM Templates
 
-This repository does **not** include the OpenFOAM case templates (`foam_templates/`), as they are derived from the OpenFOAM tutorials and are subject to the OpenFOAM license.
-
-You need to provide your own templates under:
+Case templates are included in `foam_templates/` and are derived from the OpenFOAM motorBike tutorial.
 
 ```
 foam_templates/
