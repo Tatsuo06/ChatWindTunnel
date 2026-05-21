@@ -45,15 +45,22 @@ async def geometry_preview(sim_id: int, current_user: CurrentUser, db: DB):
     tmp_path = None
     domain: dict | None = None
 
-    if rotated and rotated.exists():
+    # Use case_dir STL only if the stored angles match the current settings
+    params_file = Path(sim.case_dir) / "case_params.json" if sim.case_dir else None
+    angles_match = False
+    if rotated and rotated.exists() and params_file and params_file.exists():
+        p = _json.loads(params_file.read_text())
+        angles_match = (
+            abs(p.get("yaw_deg", 0) - sim.yaw_deg) < 0.01 and
+            abs(p.get("pitch_deg", 0) - sim.pitch_deg) < 0.01 and
+            abs(p.get("roll_deg", 0) - sim.roll_deg) < 0.01
+        )
+
+    if rotated and rotated.exists() and angles_match:
         stl_path = rotated
-        params_file = Path(sim.case_dir) / "case_params.json"
-        if params_file.exists():
-            p = _json.loads(params_file.read_text())
-            label = f"ヨー: {p.get('yaw_deg', 0)}°  ピッチ: {p.get('pitch_deg', 0)}°  ロール: {p.get('roll_deg', 0)}°（計算済み）"
-            domain = p
-        else:
-            label = f"ヨー: {sim.yaw_deg}°  ピッチ: {sim.pitch_deg}°  ロール: {sim.roll_deg}°（計算済み）"
+        p = _json.loads(params_file.read_text())
+        label = f"ヨー: {p.get('yaw_deg', 0)}°  ピッチ: {p.get('pitch_deg', 0)}°  ロール: {p.get('roll_deg', 0)}°（計算済み）"
+        domain = p
 
     elif sim.yaw_deg or sim.pitch_deg or sim.roll_deg:
         # 2) 未投入だがyaw/pitch/roll設定あり: オンザフライで回転してプレビュー
@@ -131,7 +138,38 @@ async def cutting_plane(sim_id: int, field: str = "p", current_user: CurrentUser
     if not vtk_files:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cutting plane data")
 
-    return _png(backend.plot_cutting_plane(vtk_files[-1], field=field))
+    geo_bounds = None
+    params_file = case_dir / "case_params.json"
+    if params_file.exists():
+        import json as _json
+        params = _json.loads(params_file.read_text())
+        rb_min = params.get("refbox_min")
+        rb_max = params.get("refbox_max")
+        if rb_min and rb_max:
+            geo_bounds = {"xmin": rb_min[0], "xmax": rb_max[0],
+                          "zmin": rb_min[2], "zmax": rb_max[2]}
+
+    return _png(backend.plot_cutting_plane(vtk_files[-1], field=field, geo_bounds=geo_bounds))
+
+
+@router.get("/cutting-plane-data")
+async def cutting_plane_data(sim_id: int, field: str = "p", current_user: CurrentUser = None, db: DB = None):
+    sim = await _get_done_sim(sim_id, db)
+    if not sim.case_dir:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+
+    case_dir = Path(sim.case_dir)
+    vtk_files = sorted(
+        (case_dir / "postProcessing" / "cuttingPlane").glob("**/yNormal.vtp"),
+        key=lambda p: float(p.parent.name) if p.parent.name.replace(".", "").isdigit() else 0,
+    )
+    if not vtk_files:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cutting plane data")
+
+    data = backend.cutting_plane_data(vtk_files[-1], field=field)
+    if not data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Field not found")
+    return data
 
 
 @router.get("/mesh")
@@ -148,14 +186,18 @@ async def mesh_surface(sim_id: int, view: str = "iso", current_user: CurrentUser
 @router.get("/mesh-stats")
 async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
     import pyvista as pv
-    from backend.visualization.parsers import parse_mesh_info
+    from backend.visualization.parsers import parse_mesh_info, parse_peak_memory
 
     sim = await _get_done_sim(sim_id, db)
     if not sim.case_dir:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
     case_dir = Path(sim.case_dir)
-
     info = parse_mesh_info(case_dir)
+    peak_mem = parse_peak_memory(case_dir)
+    if peak_mem.get("simpleFoam") is not None:
+        info["peak_memory_simple_kb"] = peak_mem["simpleFoam"]
+    if peak_mem.get("snappyHexMesh") is not None:
+        info["peak_memory_snappy_kb"] = peak_mem["snappyHexMesh"]
 
     foam_file = case_dir / "case.foam"
     if foam_file.exists():
@@ -199,4 +241,15 @@ async def streamlines(sim_id: int, current_user: CurrentUser, db: DB):
     if not vtk_files:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No streamline data")
 
-    return _png(backend.plot_streamlines(vtk_files[-1]))
+    geo_bounds = None
+    params_file = case_dir / "case_params.json"
+    if params_file.exists():
+        import json as _json
+        params = _json.loads(params_file.read_text())
+        rb_min = params.get("refbox_min")
+        rb_max = params.get("refbox_max")
+        if rb_min and rb_max:
+            geo_bounds = {"xmin": rb_min[0], "xmax": rb_max[0],
+                          "zmin": rb_min[2], "zmax": rb_max[2]}
+
+    return _png(backend.plot_streamlines(vtk_files[-1], geo_bounds=geo_bounds))

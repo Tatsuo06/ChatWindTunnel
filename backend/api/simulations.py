@@ -21,7 +21,7 @@ DEFAULT_PARAMETERS = {
     "turbulent_ke": 0.24,
     "turbulent_omega": 1.78,
     # Solver
-    "end_time": 500,
+    "end_time": 1000,
     "delta_t": 1e-4,
     "n_processors": 16,
     "decompose_method": "scotch",
@@ -75,6 +75,8 @@ class SimulationResponse(BaseModel):
     parameters: dict
     job_id: str
     created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

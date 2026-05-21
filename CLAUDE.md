@@ -157,12 +157,13 @@ cofr = bounding-box centroid [(x0+x1)/2, (y0+y1)/2, (z0+z1)/2] — matches rotat
 
 Using the **unrotated** STL for aref/lref/cofr is intentional: aref must be constant across yaw angles so Cd/Cl values on a yaw-sweep chart are normalised by the same reference area and remain directly comparable. Using the rotated frontal area would change aref at each yaw angle and mislead the comparison.
 
-**refinementBox is computed from the rotated STL bounding box**: The snappyHexMesh refinementBox is set to 20% outside the bounding box of the **rotated** STL (i.e. after yaw/pitch rotation is applied). The blockMesh domain dimensions continue to use the pre-rotation STL.
+**refinementBox is computed from the rotated STL bounding box**: The snappyHexMesh refinementBox uses a uniform padding of `0.2 * max(dx, dy, dz)` in all directions. This avoids overly tight boxes for elongated geometries where per-axis 20% would be very small in the narrow directions.
 
 ```
 dx = x1_rot - x0_rot  (and similarly dy, dz)
-refbox_min = [x0_rot - 0.2*dx,  y0_rot - 0.2*dy,  max(0, z0_rot - 0.2*dz)]
-refbox_max = [x1_rot + 0.2*dx,  y1_rot + 0.2*dy,  z1_rot + 0.2*dz]
+pad = 0.2 * max(dx, dy, dz)
+refbox_min = [x0_rot - pad,  y0_rot - pad,  max(0, z0_rot - pad)]
+refbox_max = [x1_rot + pad,  y1_rot + pad,  z1_rot + pad]
 ```
 
 Implemented in `case_builder._refbox_from_rotated_stl()`. Called in `build_case()` after STL rotation, and in `results.py` geometry preview endpoint. This ensures the refinement region always tightly follows the actual rotated geometry orientation.

@@ -11,8 +11,8 @@ from backend.api.deps import DB, CurrentUser
 from backend.cluster import get_runner
 from backend.cluster.cluster_runner import ClusterRunner
 from backend.core.config import settings
-from backend.db.models import Geometry, Simulation, SimulationStatus, UserRole
-from backend.foam.case_builder import build_case
+from backend.db.models import Geometry, Simulation, SimulationStatus, SimulatorType, UserRole
+from backend.foam.case_builder import build_case, build_restart_case
 
 router = APIRouter(prefix="/simulations/{sim_id}/job", tags=["jobs"])
 
@@ -159,6 +159,48 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
         "pct": pct,
         "solver": log_name.replace("log.", ""),
     }
+
+
+class RestartRequest(BaseModel):
+    new_end_time: int
+
+
+@router.post("/restart", response_model=JobStatusResponse)
+async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUser, db: DB):
+    """Continue a finished steady-state simulation with an extended endTime."""
+    sim = await _get_sim_with_geo(sim_id, db)
+    if current_user.role != UserRole.admin and sim.geometry.project.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    if sim.status not in (SimulationStatus.done, SimulationStatus.failed):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only restart DONE or FAILED jobs")
+    if not sim.case_dir:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No case directory found")
+    if sim.solver_type != SimulatorType.steady:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Restart only supported for steady-state simulations")
+
+    build_restart_case(Path(sim.case_dir), body.new_end_time)
+
+    runner = get_runner()
+    n_processors = (
+        settings.CLUSTER_N_PROCESSORS
+        if isinstance(runner, ClusterRunner)
+        else int(sim.parameters.get("n_processors", 6))
+    )
+    job_id = runner.submit(
+        case_dir=Path(sim.case_dir),
+        n_processors=n_processors,
+        job_name=f"cwt_{sim.id}_r",
+    )
+
+    sim.parameters = {**sim.parameters, "end_time": body.new_end_time}
+    sim.job_id = job_id
+    sim.status = SimulationStatus.running
+    sim.started_at = datetime.now(timezone.utc)
+    sim.finished_at = None
+    await db.commit()
+    await db.refresh(sim)
+
+    return JobStatusResponse(sim_id=sim.id, status=sim.status, job_id=job_id)
 
 
 @router.post("/cancel", status_code=status.HTTP_204_NO_CONTENT)

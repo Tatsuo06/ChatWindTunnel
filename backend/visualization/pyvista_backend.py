@@ -89,12 +89,12 @@ class PyVistaBackend(VisualizationBackend):
             return _empty_plot("No force coefficient data found")
 
         fig = go.Figure()
-        for col in ("Cd", "Cl", "Cs"):
+        for col in ("Cx", "Cz", "CmYaw", "Cy"):
             if col in df.columns:
                 fig.add_trace(go.Scatter(x=df["Time"], y=df[col], name=col, mode="lines"))
 
         fig.update_layout(
-            title="Force Coefficients",
+            title="Force / Moment Coefficients",
             xaxis_title="Iteration / Time",
             yaxis_title="Coefficient",
             template="plotly_white",
@@ -102,7 +102,8 @@ class PyVistaBackend(VisualizationBackend):
         )
         return pio.to_image(fig, format="png")
 
-    def plot_cutting_plane(self, vtk_path: Path, field: str = "p") -> bytes:
+    def plot_cutting_plane(self, vtk_path: Path, field: str = "p",
+                           geo_bounds: dict | None = None) -> bytes:
         mesh = pv.read(str(vtk_path))
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
 
@@ -121,12 +122,63 @@ class PyVistaBackend(VisualizationBackend):
             )
 
         pl.add_axes()
-        # Cutting plane is at y≈0 (XZ plane), view from +Y looking toward -Y
         pl.view_xz()
-        pl.reset_camera()
+
+        if geo_bounds:
+            x0, x1 = geo_bounds["xmin"], geo_bounds["xmax"]
+            z0, z1 = geo_bounds["zmin"], geo_bounds["zmax"]
+            dx = x1 - x0
+            dz = z1 - z0
+            pl.reset_camera(bounds=[
+                x0, x1,
+                -1, 1,
+                max(0.0, z0), z1,
+            ])
+        else:
+            pl.reset_camera()
+
         img = pl.screenshot(return_img=True)
         pl.close()
         return _array_to_png(img)
+
+    def cutting_plane_data(self, vtk_path: Path, field: str = "p") -> dict:
+        import numpy as np
+        from scipy.interpolate import griddata
+
+        mesh = pv.read(str(vtk_path))
+        pts = mesh.points  # (N, 3)
+        x = pts[:, 0]
+        z = pts[:, 2]
+
+        if field == "U":
+            U = mesh.point_data.get("U")
+            if U is None:
+                U = mesh.cell_data.get("U")
+            if U is None:
+                return {}
+            vals = np.linalg.norm(U, axis=1)
+        else:
+            vals = mesh.point_data.get(field)
+            if vals is None:
+                vals = mesh.cell_data.get(field)
+            if vals is None:
+                return {}
+            vals = np.asarray(vals)
+
+        nx, nz = 300, 150
+        xi = np.linspace(x.min(), x.max(), nx)
+        zi = np.linspace(z.min(), z.max(), nz)
+        Xi, Zi = np.meshgrid(xi, zi)
+        Vi = griddata((x, z), vals, (Xi, Zi), method="linear")
+
+        return {
+            "x": xi.tolist(),
+            "z": zi.tolist(),
+            "values": Vi.tolist(),
+            "field": field,
+            "vmin": float(np.nanmin(vals)),
+            "vmax": float(np.nanmax(vals)),
+        }
 
     def plot_mesh_surface(self, case_dir: Path, patch: str = "motorBike",
                           view: str = "iso") -> bytes:
@@ -178,7 +230,7 @@ class PyVistaBackend(VisualizationBackend):
         pl.close()
         return _array_to_png(img)
 
-    def plot_streamlines(self, vtk_path: Path) -> bytes:
+    def plot_streamlines(self, vtk_path: Path, geo_bounds: dict | None = None) -> bytes:
         import numpy as np
         mesh = pv.read(str(vtk_path))
         # Compute velocity magnitude for coloring
@@ -191,7 +243,14 @@ class PyVistaBackend(VisualizationBackend):
         pl.add_mesh(mesh, scalars=scalars, cmap="plasma", line_width=2, show_scalar_bar=True)
         pl.add_axes()
         pl.view_xz()
-        pl.reset_camera()
+        if geo_bounds:
+            pl.reset_camera(bounds=[
+                geo_bounds["xmin"], geo_bounds["xmax"],
+                -1, 1,
+                max(0.0, geo_bounds["zmin"]), geo_bounds["zmax"],
+            ])
+        else:
+            pl.reset_camera()
         img = pl.screenshot(return_img=True)
         pl.close()
         return _array_to_png(img)

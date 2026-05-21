@@ -4,6 +4,29 @@ import streamlit as st
 import frontend.api_client as api
 from frontend.i18n import t
 
+
+def _show_restart_expander(sim: dict, sim_id: int) -> None:
+    with st.expander(t("restart_job"), expanded=True):
+        current_end = int(sim.get("parameters", {}).get("end_time", 500))
+        st.caption(f"{t('restart_current_end')}: {current_end}")
+        add_steps = st.number_input(
+            t("restart_add_steps"),
+            min_value=1,
+            value=500,
+            step=100,
+            key="restart_add_steps_input",
+        )
+        new_end = current_end + int(add_steps)
+        st.caption(f"{t('restart_new_end')}: {new_end}")
+        if st.button(t("restart_job"), key="restart_btn", use_container_width=True):
+            with st.spinner(t("restarting")):
+                result = api.restart_job(sim_id, new_end)
+            if result:
+                st.success(t("restart_ok", result.get("job_id")))
+                st.rerun()
+            else:
+                st.error(t("restart_fail"))
+
 if "token" not in st.session_state:
     st.warning(t("login_required"))
     st.stop()
@@ -270,11 +293,48 @@ with right:
             else:
                 st.info(t("solver_log_wait"))
 
+        if current_status == "FAILED" and sim.get("solver_type") == "STEADY":
+            _show_restart_expander(sim, sim_id)
+            st.stop()
+
         if current_status != "DONE":
             st.info(t("sim_pending_msg"))
             st.stop()
 
         st.success(t("sim_done"))
+
+        started  = sim.get("started_at")
+        finished = sim.get("finished_at")
+        if started and finished:
+            from datetime import datetime, timezone
+            fmt = "%Y-%m-%dT%H:%M:%S"
+            try:
+                s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                f = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+                elapsed = int((f - s).total_seconds())
+                h, rem = divmod(elapsed, 3600)
+                m, sec = divmod(rem, 60)
+                elapsed_str = f"{h}h {m}m {sec}s" if h else f"{m}m {sec}s"
+                st.caption(f"{t('calc_time')}: {elapsed_str}")
+            except Exception:
+                pass
+
+        stats = api.get_mesh_stats(sim_id)
+        if stats:
+            mem_parts = []
+            simple_kb = stats.get("peak_memory_simple_kb")
+            snappy_kb = stats.get("peak_memory_snappy_kb")
+            if simple_kb:
+                mem_parts.append(f"simpleFoam: {simple_kb/1024/1024:.1f} GB")
+            if snappy_kb:
+                mem_parts.append(f"snappyHexMesh: {snappy_kb/1024/1024:.1f} GB")
+            if mem_parts:
+                st.caption(f"{t('stat_peak_memory')}: {' / '.join(mem_parts)}")
+
+        # ── Restart ────────────────────────────────────────────────
+        if sim.get("solver_type") == "STEADY":
+            _show_restart_expander(sim, sim_id)
+
         st.divider()
 
         tab_mesh, tab_conv, tab_fc, tab_plane, tab_stream = st.tabs([
@@ -286,7 +346,6 @@ with right:
             st.subheader(t("surface_mesh"))
 
             # Mesh stats
-            stats = api.get_mesh_stats(sim_id)
             if stats:
                 mc1, mc2, mc3, mc4 = st.columns(4)
                 mc1.metric(t("stat_total_cells"),   f"{stats.get('cells', '-'):,}" if stats.get('cells') else "-")

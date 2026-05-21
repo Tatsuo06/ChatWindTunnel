@@ -90,4 +90,30 @@ else:
                             st.session_state.pop("geo_name", None)
                             st.session_state.pop("sim_id", None)
                         st.rerun()
+        if not geo.get("stl_file_path"):
+            with st.container():
+                up = st.file_uploader(
+                    t("file_drop"), type=["stl", "step", "stp", "iges", "igs", "obj"],
+                    key=f"reupload_{geo['id']}",
+                )
+                if up:
+                    with st.spinner(t("converting")):
+                        result = api.upload_cad(geo["id"], up.read(), up.name)
+                    if result:
+                        st.success(t("geo_uploaded", result["name"]))
+                        st.rerun()
+                    else:
+                        st.error(t("upload_fail"))
+
+        if is_selected and geo.get("stl_file_path"):
+            bbox = api.get_geometry_bbox(geo["id"])
+            if bbox:
+                mn, mx = bbox["min"], bbox["max"]
+                st.caption(
+                    f"Bounding box — "
+                    f"X: {mn[0]:.3f} → {mx[0]:.3f} m &nbsp;|&nbsp; "
+                    f"Y: {mn[1]:.3f} → {mx[1]:.3f} m &nbsp;|&nbsp; "
+                    f"Z: {mn[2]:.3f} → {mx[2]:.3f} m &nbsp;|&nbsp; "
+                    f"L×W×H: {mx[0]-mn[0]:.3f} × {mx[1]-mn[1]:.3f} × {mx[2]-mn[2]:.3f} m"
+                )
         st.divider()

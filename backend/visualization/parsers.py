@@ -6,23 +6,23 @@ import pandas as pd
 
 
 def parse_residuals(log_path: Path) -> pd.DataFrame:
-    """Extract residual history from simpleFoam/pisoFoam log.
+    """Extract residual history, combining restart logs (log.X.1, log.X.2, …, log.X).
 
     Returns DataFrame with columns: Time, Ux, Uy, Uz, p, k, omega (where available).
     """
-    pattern = re.compile(
-        r"^Time = ([\d.eE+\-]+).*?"
-        r"Solving for Ux.*?Initial residual = ([\d.eE+\-]+).*?"
-        r"Solving for Uy.*?Initial residual = ([\d.eE+\-]+).*?"
-        r"Solving for Uz.*?Initial residual = ([\d.eE+\-]+).*?"
-        r"Solving for p.*?Initial residual = ([\d.eE+\-]+)",
-        re.DOTALL | re.MULTILINE,
+    log_stem = log_path.name
+    numbered = sorted(
+        [p for p in log_path.parent.glob(f"{log_stem}.*")
+         if p.suffix.lstrip(".").isdigit()],
+        key=lambda p: int(p.suffix.lstrip(".")),
     )
+    dfs = [_parse_single_log(lp) for lp in [*numbered, log_path] if lp.exists()]
+    dfs = [df for df in dfs if not df.empty]
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-    records = []
+
+def _parse_single_log(log_path: Path) -> pd.DataFrame:
     text = log_path.read_text(errors="replace")
-
-    # Simpler per-field extraction
     time_vals = re.findall(r"^Time = ([\d.eE+\-]+)", text, re.MULTILINE)
     fields = {}
     for field in ("Ux", "Uy", "Uz", "p", "k", "omega", "nuTilda"):
@@ -32,10 +32,8 @@ def parse_residuals(log_path: Path) -> pd.DataFrame:
         )
         if hits:
             fields[field] = [float(v) for v in hits]
-
     if not time_vals or not fields:
         return pd.DataFrame()
-
     n = min(len(time_vals), *(len(v) for v in fields.values()))
     df = pd.DataFrame({"Time": [float(t) for t in time_vals[:n]]})
     for f, vals in fields.items():
@@ -92,10 +90,25 @@ def parse_force_coefficients(postproc_dir: Path) -> pd.DataFrame:
         dat = td / "coefficient.dat"
         if not dat.exists():
             continue
-        # File format: # Time Cd Cs Cl CmRoll CmPitch CmYaw
+        # Columns: Time Cd Cd(f) Cd(r) Cl Cl(f) Cl(r) CmPitch CmRoll CmYaw Cs Cs(f) Cs(r)
         df = pd.read_csv(dat, sep=r"\s+", comment="#", header=None)
-        df = df.iloc[:, :4]
-        df.columns = ["Time", "Cd", "Cs", "Cl"]
+        df = df.iloc[:, [0, 1, 4, 9, 10]]
+        df.columns = ["Time", "Cx", "Cz", "CmYaw", "Cy"]
         dfs.append(df)
 
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+
+def _parse_mem_log(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    m = re.search(r"(\d+)\s+kB", path.read_text())
+    return int(m.group(1)) if m else None
+
+
+def parse_peak_memory(case_dir: Path) -> dict:
+    """Return peak RSS in kB for simpleFoam and snappyHexMesh."""
+    return {
+        "simpleFoam":    _parse_mem_log(case_dir / "log.mem_monitor"),
+        "snappyHexMesh": _parse_mem_log(case_dir / "log.mem_snappy"),
+    }

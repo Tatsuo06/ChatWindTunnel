@@ -131,14 +131,18 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
             df = parse_force_coefficients(Path(sim.case_dir))
             if df.empty:
                 continue
-            last = df.iloc[-1]
+            tail = df.iloc[max(0, int(len(df) * 0.8)):]
+            avg = tail.mean(numeric_only=True)
             points.append({
                 "sim_id": sim.id,
                 "sim_name": sim.name,
                 "yaw_deg": sim.yaw_deg,
                 "pitch_deg": sim.pitch_deg,
-                "Cd": round(float(last["Cd"]), 4),
-                "Cl": round(float(last["Cl"]), 4),
+                "roll_deg": sim.roll_deg,
+                "Cx": round(float(avg["Cx"]), 4),
+                "Cz": round(float(avg["Cz"]), 4),
+                "Cy": round(float(avg["Cy"]), 4) if "Cy" in avg.index else None,
+                "CmYaw": round(float(avg["CmYaw"]), 4) if "CmYaw" in avg.index else None,
             })
         if points:
             points.sort(key=lambda x: x["yaw_deg"])

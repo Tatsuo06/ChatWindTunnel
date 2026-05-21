@@ -27,8 +27,8 @@ class GeometryResponse(BaseModel):
     id: int
     project_id: int
     name: str
-    stl_file_path: str
-    cad_file_path: str
+    stl_file_path: str | None
+    cad_file_path: str | None
 
     model_config = {"from_attributes": True}
 

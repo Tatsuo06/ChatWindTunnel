@@ -34,7 +34,22 @@ _ALLRUN_STEADY = textwrap.dedent("""\
     rm -rf processor*
     runApplication decomposePar -decomposeParDict system/decomposeParDict
 
+    (
+        while true; do
+            ps aux | grep "[s]nappyHexMesh" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_snappy.tmp
+            sleep 1
+        done
+    ) &
+    _MON_SNAPPY=$!
+
     runParallel snappyHexMesh -overwrite
+
+    kill $_MON_SNAPPY 2>/dev/null
+    if [ -s log.mem_snappy.tmp ]; then
+        peak=$(sort -n log.mem_snappy.tmp | tail -1)
+        echo "Peak RSS (all snappyHexMesh processes): ${peak} kB" > log.mem_snappy
+    fi
+    rm -f log.mem_snappy.tmp
 
     runParallel topoSet
 
@@ -46,7 +61,23 @@ _ALLRUN_STEADY = textwrap.dedent("""\
 
     runParallel checkMesh -writeFields '(nonOrthoAngle)' -constant
 
+    # Memory monitor: poll RSS of all solver processes every 5 s
+    (
+        while true; do
+            ps aux | grep "[s]impleFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_monitor.tmp
+            sleep 5
+        done
+    ) &
+    _MON_PID=$!
+
     runParallel $(getApplication)
+
+    kill $_MON_PID 2>/dev/null
+    if [ -s log.mem_monitor.tmp ]; then
+        peak=$(sort -n log.mem_monitor.tmp | tail -1)
+        echo "Peak RSS (all simpleFoam processes): ${peak} kB" > log.mem_monitor
+    fi
+    rm -f log.mem_monitor.tmp
 
     runApplication reconstructParMesh -constant
 
@@ -63,13 +94,39 @@ _ALLRUN_LES = textwrap.dedent("""\
     runApplication blockMesh
     rm -rf processor*
     runApplication decomposePar -decomposeParDict system/decomposeParDict
+    (
+        while true; do
+            ps aux | grep "[s]nappyHexMesh" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_snappy.tmp
+            sleep 1
+        done
+    ) &
+    _MON_SNAPPY=$!
     runParallel snappyHexMesh -overwrite
+    kill $_MON_SNAPPY 2>/dev/null
+    if [ -s log.mem_snappy.tmp ]; then
+        peak=$(sort -n log.mem_snappy.tmp | tail -1)
+        echo "Peak RSS (all snappyHexMesh processes): ${peak} kB" > log.mem_snappy
+    fi
+    rm -f log.mem_snappy.tmp
     runParallel topoSet
     restore0Dir -processor
     runParallel patchSummary
     runParallel potentialFoam -writephi
     runParallel checkMesh -writeFields '(nonOrthoAngle)' -constant
+    (
+        while true; do
+            ps aux | grep "[s]impleFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_monitor.tmp
+            sleep 5
+        done
+    ) &
+    _MON_PID=$!
     runParallel simpleFoam
+    kill $_MON_PID 2>/dev/null
+    if [ -s log.mem_monitor.tmp ]; then
+        peak=$(sort -n log.mem_monitor.tmp | tail -1)
+        echo "Peak RSS (all simpleFoam processes): ${peak} kB" > log.mem_monitor
+    fi
+    rm -f log.mem_monitor.tmp
 
     # === Phase 2: LES (SpalartAllmarasDDES) ===
     # Swap steady-state solution as LES initial condition
@@ -85,6 +142,34 @@ _ALLRUN_LES = textwrap.dedent("""\
 
     runApplication reconstructParMesh -constant
     runApplication reconstructPar
+""")
+
+_ALLRUN_RESTART = textwrap.dedent("""\
+    #!/bin/sh
+    cd "${0%/*}" || exit
+    . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+    _i=1; while [ -f "log.simpleFoam.$_i" ]; do _i=$((_i+1)); done
+    [ -f log.simpleFoam ] && mv log.simpleFoam log.simpleFoam.$_i
+
+    (
+        while true; do
+            ps aux | grep "[s]impleFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_monitor.tmp
+            sleep 5
+        done
+    ) &
+    _MON_PID=$!
+
+    runParallel $(getApplication)
+
+    kill $_MON_PID 2>/dev/null
+    if [ -s log.mem_monitor.tmp ]; then
+        peak=$(sort -n log.mem_monitor.tmp | tail -1)
+        echo "Peak RSS (all simpleFoam processes): ${peak} kB" > log.mem_monitor
+    fi
+    rm -f log.mem_monitor.tmp
+
+    runApplication reconstructPar -latestTime
 """)
 
 
@@ -155,6 +240,21 @@ def build_case(
     # For LES: copy LES config files alongside steady files so Allrun can swap them
     if solver_type == SimulatorType.unsteady:
         _prepare_les_files(case_dir)
+
+    return case_dir
+
+
+def build_restart_case(case_dir: Path, new_end_time: int) -> Path:
+    """Update endTime/startFrom in controlDict and replace Allrun with solver-only restart script."""
+    ctrl_path = case_dir / "system" / "controlDict"
+    content = ctrl_path.read_text()
+    content = _set_value(content, "endTime", str(new_end_time))
+    content = _set_value(content, "startFrom", "latestTime")
+    ctrl_path.write_text(content)
+
+    allrun = case_dir / "Allrun"
+    allrun.write_text(_ALLRUN_RESTART)
+    allrun.chmod(0o755)
 
     return case_dir
 
@@ -366,11 +466,10 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
 
 
 def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
-    """Compute refinementBox from the rotated STL bounding box with a fixed margin ratio.
+    """Compute refinementBox from the rotated STL bounding box with a uniform margin.
 
-    Rule: each face of the box is placed margin*extent outside the STL bounds.
-      refbox_min[i] = stl_min[i] - margin * (stl_max[i] - stl_min[i])
-      refbox_max[i] = stl_max[i] + margin * (stl_max[i] - stl_min[i])
+    Rule: margin = 0.2 * max(dx, dy, dz) applied equally in all directions.
+    This avoids overly tight boxes for elongated geometries.
     Z min is clamped to 0 (ground plane).
     """
     from stl import mesh as stl_mesh
@@ -381,16 +480,17 @@ def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
     x1, y1, z1 = float(pts[:, 0].max()), float(pts[:, 1].max()), float(pts[:, 2].max())
 
     dx, dy, dz = x1 - x0, y1 - y0, z1 - z0
+    pad = margin * max(dx, dy, dz)
 
     refbox_min = [
-        round(x0 - margin * dx, 3),
-        round(y0 - margin * dy, 3),
-        max(0.0, round(z0 - margin * dz, 3)),
+        round(x0 - pad, 3),
+        round(y0 - pad, 3),
+        max(0.0, round(z0 - pad, 3)),
     ]
     refbox_max = [
-        round(x1 + margin * dx, 3),
-        round(y1 + margin * dy, 3),
-        round(z1 + margin * dz, 3),
+        round(x1 + pad, 3),
+        round(y1 + pad, 3),
+        round(z1 + pad, 3),
     ]
     return {"refbox_min": refbox_min, "refbox_max": refbox_max}
 

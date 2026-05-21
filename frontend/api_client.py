@@ -163,6 +163,11 @@ def cancel_job(sim_id: int) -> bool:
     return _post(f"/simulations/{sim_id}/job/cancel").status_code == 204
 
 
+def restart_job(sim_id: int, new_end_time: int) -> dict | None:
+    r = _post(f"/simulations/{sim_id}/job/restart", json={"new_end_time": new_end_time})
+    return r.json() if r.ok else None
+
+
 def get_job_progress(sim_id: int) -> dict | None:
     r = _get(f"/simulations/{sim_id}/job/progress")
     return r.json() if r.ok else None
@@ -198,6 +203,11 @@ def get_force_coefficients_plot(sim_id: int) -> bytes | None:
 def get_cutting_plane_plot(sim_id: int, field: str = "p") -> bytes | None:
     r = _get(f"/simulations/{sim_id}/results/cutting-plane", params={"field": field})
     return r.content if r.ok else None
+
+
+def get_cutting_plane_data(sim_id: int, field: str = "p") -> dict | None:
+    r = _get(f"/simulations/{sim_id}/results/cutting-plane-data", params={"field": field})
+    return r.json() if r.ok else None
 
 
 def get_mesh_plot(sim_id: int, view: str = "iso") -> bytes | None:
