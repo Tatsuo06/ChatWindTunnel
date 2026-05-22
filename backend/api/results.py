@@ -149,7 +149,9 @@ async def cutting_plane(sim_id: int, field: str = "p", current_user: CurrentUser
             geo_bounds = {"xmin": rb_min[0], "xmax": rb_max[0],
                           "zmin": rb_min[2], "zmax": rb_max[2]}
 
-    return _png(backend.plot_cutting_plane(vtk_files[-1], field=field, geo_bounds=geo_bounds))
+    stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
+    return _png(backend.plot_cutting_plane(vtk_files[-1], field=field, geo_bounds=geo_bounds,
+                                           stl_path=stl_path if stl_path.exists() else None))
 
 
 @router.get("/cutting-plane-data")

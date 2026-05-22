@@ -14,6 +14,7 @@ from backend.core.config import settings
 from backend.db.models import ChatMessage, Geometry, Simulation, SimulationStatus, SimulatorType
 from backend.db.models import UserRole
 from backend.foam.case_builder import build_case
+from backend.visualization.parsers import parse_force_coefficients, parse_mesh_info, parse_clock_time, parse_peak_memory
 
 router = APIRouter(prefix="/simulations/{sim_id}/chat", tags=["chat"])
 
@@ -51,10 +52,44 @@ async def send_message(sim_id: int, body: ChatRequest, current_user: CurrentUser
     # Save user message
     db.add(ChatMessage(simulation_id=sim_id, role="user", content=body.message))
 
+    # Collect sibling cases summary for cross-case comparison
+    siblings_result = await db.execute(
+        select(Simulation).where(Simulation.geometry_id == sim.geometry_id)
+    )
+    all_cases = []
+    for s in siblings_result.scalars().all():
+        row: dict = {
+            "sim_id": s.id,
+            "name": s.name,
+            "status": s.status.value,
+            "yaw_deg": s.yaw_deg,
+            "pitch_deg": s.pitch_deg,
+            "Cx": None, "Cy": None, "Cz": None, "CmYaw": None,
+            "mesh_cells": None, "clock_time_s": None, "peak_memory_kb": None,
+        }
+        if s.status == SimulationStatus.done and s.case_dir:
+            cd = Path(s.case_dir)
+            df = parse_force_coefficients(cd)
+            if not df.empty:
+                tail = df.iloc[max(0, int(len(df) * 0.8)):]
+                avg = tail.mean(numeric_only=True)
+                row["Cx"] = round(float(avg["Cx"]), 4) if "Cx" in avg else None
+                row["Cy"] = round(float(avg["Cy"]), 4) if "Cy" in avg else None
+                row["Cz"] = round(float(avg["Cz"]), 4) if "Cz" in avg else None
+                row["CmYaw"] = round(float(avg["CmYaw"]), 4) if "CmYaw" in avg else None
+            mi = parse_mesh_info(cd)
+            row["mesh_cells"] = mi.get("cells")
+            ct = parse_clock_time(cd)
+            row["clock_time_s"] = ct
+            mem = parse_peak_memory(cd)
+            mem_kb = mem.get("simpleFoam")
+            row["peak_memory_kb"] = mem_kb
+        all_cases.append(row)
+
     # Call LLM
     case_dir = settings.CASES_DIR / str(sim_id)
     reply, updated_params, angle_updates, sim_creations, job_submission = await chat(
-        history, sim.parameters, case_dir=case_dir
+        history, sim.parameters, case_dir=case_dir, all_cases=all_cases
     )
 
     # Persist updates to current simulation

@@ -6,7 +6,7 @@ from frontend.i18n import t
 
 
 def _show_restart_expander(sim: dict, sim_id: int) -> None:
-    with st.expander(t("restart_job"), expanded=True):
+    with st.expander(t("restart_job"), expanded=False):
         current_end = int(sim.get("parameters", {}).get("end_time", 500))
         st.caption(f"{t('restart_current_end')}: {current_end}")
         add_steps = st.number_input(

@@ -112,3 +112,12 @@ def parse_peak_memory(case_dir: Path) -> dict:
         "simpleFoam":    _parse_mem_log(case_dir / "log.mem_monitor"),
         "snappyHexMesh": _parse_mem_log(case_dir / "log.mem_snappy"),
     }
+
+
+def parse_clock_time(case_dir: Path) -> float | None:
+    """Extract final ClockTime (seconds) from solver log."""
+    log = next(case_dir.glob("log.*Foam"), None) if case_dir and case_dir.exists() else None
+    if not log:
+        return None
+    matches = re.findall(r"ClockTime\s*=\s*([\d.]+)\s*s", log.read_text(errors="replace"))
+    return float(matches[-1]) if matches else None

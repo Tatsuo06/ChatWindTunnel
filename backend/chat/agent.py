@@ -10,7 +10,7 @@ from typing import AsyncIterator
 from litellm import acompletion
 
 from backend.core.config import settings
-from backend.visualization.parsers import parse_force_coefficients, parse_mesh_info, parse_residuals
+from backend.visualization.parsers import parse_force_coefficients, parse_mesh_info, parse_residuals, parse_clock_time, parse_peak_memory
 
 SYSTEM_PROMPT = """\
 You are a CFD simulation assistant for the ChatWindTunnel system.
@@ -134,6 +134,30 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "compare_cases",
+            "description": (
+                "Return a summary table of all simulation cases for the same geometry. "
+                "Each row contains: name, status, yaw_deg, pitch_deg, Cx, Cy, Cz, CmYaw, "
+                "mesh_cells, clock_time_s, peak_memory_kb. "
+                "Use this to answer questions like: which case has the highest Cx, "
+                "which took the longest, which used the most memory, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status_filter": {
+                        "type": "string",
+                        "enum": ["all", "done", "running", "pending", "failed"],
+                        "description": "Filter cases by status (default: all)",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_simulation",
             "description": "Create a new simulation case for the same geometry. Use this when the user wants to create additional cases with different conditions (e.g., yaw angle sweep). Call once per case.",
             "parameters": {
@@ -161,7 +185,8 @@ def _turbulence_from_intensity(velocity: float, intensity: float, lref: float = 
 
 
 def _execute_tool(
-    tool_name: str, tool_args: dict, current_params: dict, case_dir: Path
+    tool_name: str, tool_args: dict, current_params: dict, case_dir: Path,
+    all_cases: list[dict] | None = None,
 ) -> tuple[dict, str, dict, list[dict], dict | None]:
     """Apply tool call to current_params dict.
     Returns (updated_params, result_message, angle_updates, sim_creations, job_submission).
@@ -233,6 +258,16 @@ def _execute_tool(
             lines.append(f"Max skewness: {info['max_skewness']:.2f}")
         return params, "\n".join(lines), {}, [], None
 
+    if tool_name == "compare_cases":
+        cases = all_cases or []
+        status_filter = tool_args.get("status_filter", "all")
+        if status_filter != "all":
+            cases = [c for c in cases if c.get("status") == status_filter]
+        if not cases:
+            return params, "No cases found.", {}, [], None
+        import json as _json
+        return params, _json.dumps(cases, ensure_ascii=False), {}, [], None
+
     if tool_name == "create_simulation":
         sc = {
             "name": tool_args.get("name", "new_case"),
@@ -259,6 +294,7 @@ async def chat(
     messages: list[dict],
     current_params: dict,
     case_dir: Path = Path("/dev/null"),
+    all_cases: list[dict] | None = None,
 ) -> tuple[str, dict, dict, list[dict], dict]:
     """Run one chat turn.
     Returns (assistant_reply, updated_params, angle_updates, sim_creations, job_submission).
@@ -287,7 +323,7 @@ async def chat(
         for tc in message.tool_calls:
             tool_args = json.loads(tc.function.arguments)
             params, result_msg, angles, creations, js = _execute_tool(
-                tc.function.name, tool_args, params, case_dir
+                tc.function.name, tool_args, params, case_dir, all_cases=all_cases
             )
             angle_updates.update({k: v for k, v in angles.items() if v is not None})
             sim_creations.extend(creations)

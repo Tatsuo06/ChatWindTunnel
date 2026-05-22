@@ -103,7 +103,8 @@ class PyVistaBackend(VisualizationBackend):
         return pio.to_image(fig, format="png")
 
     def plot_cutting_plane(self, vtk_path: Path, field: str = "p",
-                           geo_bounds: dict | None = None) -> bytes:
+                           geo_bounds: dict | None = None,
+                           stl_path: Path | None = None) -> bytes:
         mesh = pv.read(str(vtk_path))
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
 
@@ -117,9 +118,19 @@ class PyVistaBackend(VisualizationBackend):
             pl.add_mesh(
                 mesh,
                 scalars=scalars,
-                cmap="RdBu_r" if field == "p" else "viridis",
+                cmap="jet",
                 show_scalar_bar=True,
             )
+
+        # Overlay STL silhouette sliced at y=0 to show geometry outline
+        if stl_path and Path(stl_path).exists():
+            try:
+                stl = pv.read(str(stl_path))
+                slice_y = stl.slice(normal="y", origin=(0, 0, 0))
+                if slice_y.n_points > 0:
+                    pl.add_mesh(slice_y, color="black", line_width=2.0)
+            except Exception:
+                pass
 
         pl.add_axes()
         pl.view_xz()
@@ -136,6 +147,7 @@ class PyVistaBackend(VisualizationBackend):
             ])
         else:
             pl.reset_camera()
+        pl.camera.zoom(1.4)
 
         img = pl.screenshot(return_img=True)
         pl.close()
@@ -201,10 +213,11 @@ class PyVistaBackend(VisualizationBackend):
         # Wind direction arrow: flow is always +X in OpenFOAM frame
         # Arrow placed upstream of the object
         bounds = mesh.bounds
-        arrow_x = bounds[0] - 0.3
+        length_x = bounds[1] - bounds[0]
+        arrow_len = length_x * 0.15
+        arrow_x = bounds[0] - length_x * 0.30
         arrow_y = (bounds[2] + bounds[3]) / 2
         arrow_z = (bounds[4] + bounds[5]) / 2
-        arrow_len = (bounds[1] - bounds[0]) * 0.25
         arrow = pv.Arrow(start=(arrow_x, arrow_y, arrow_z),
                          direction=(1, 0, 0), scale=arrow_len)
         pl.add_mesh(arrow, color="red")
@@ -226,6 +239,7 @@ class PyVistaBackend(VisualizationBackend):
         else:
             pl.view_vector((-1, -0.7, 0.5), viewup=(0, 0, 1))
         pl.reset_camera()
+        pl.camera.zoom(2.5)
         img = pl.screenshot(return_img=True)
         pl.close()
         return _array_to_png(img)

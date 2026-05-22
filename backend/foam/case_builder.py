@@ -220,6 +220,7 @@ def build_case(
     _write_force_coeffs(case_dir, params)
     _write_snappy_hex_mesh(case_dir, params)
     _write_surface_feature_extract(case_dir)
+    _write_streamlines(case_dir, params)
 
     # Empty .foam file required by pyvista.OpenFOAMReader
     (case_dir / "case.foam").touch()
@@ -462,15 +463,20 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
         "aref": aref,
         "lref": lref,
         "cofr": cofr,
+        "streamline_radius":   round(max(W, H) / 2 * 1.1, 3),
+        "streamline_n_points": 50,
     }
 
 
 def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
-    """Compute refinementBox from the rotated STL bounding box with a uniform margin.
+    """Compute refinementBox and streamline sphere params from the rotated STL bounding box.
 
     Rule: margin = 0.2 * max(dx, dy, dz) applied equally in all directions.
     This avoids overly tight boxes for elongated geometries.
     Z min is clamped to 0 (ground plane).
+
+    Streamline sphere: placed just upstream of the front face, centred on the geometry's
+    Y/Z centroid, with radius covering the frontal profile.
     """
     from stl import mesh as stl_mesh
 
@@ -492,7 +498,37 @@ def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
         round(y1 + pad, 3),
         round(z1 + pad, 3),
     ]
-    return {"refbox_min": refbox_min, "refbox_max": refbox_max}
+
+    # Streamline sphere: centred on bounding-box centroid (= rotation centre)
+    sl_cx = round((x0 + x1) / 2, 3)
+    sl_cy = round((y0 + y1) / 2, 3)
+    sl_cz = round((z0 + z1) / 2, 3)
+    sl_r  = round(max(dx, dy, dz) / 2 * 1.1, 3)
+
+    return {
+        "refbox_min": refbox_min,
+        "refbox_max": refbox_max,
+        "streamline_center": [sl_cx, sl_cy, sl_cz],
+    }
+
+
+def _sphere_seed_points(center: list, radius: float, n_points: int) -> list[list[float]]:
+    """Generate n_points uniformly distributed on a sphere surface (Fibonacci method).
+
+    Points below ground (z < 0) are mirrored to z = abs(z) to keep seeds in the domain.
+    """
+    import math
+    golden = (1 + math.sqrt(5)) / 2
+    pts = []
+    for i in range(n_points):
+        theta = math.acos(1 - 2 * (i + 0.5) / n_points)
+        phi = 2 * math.pi * i / golden
+        x = center[0] + radius * math.sin(theta) * math.cos(phi)
+        y = center[1] + radius * math.sin(theta) * math.sin(phi)
+        z = center[2] + radius * math.cos(theta)
+        z = abs(z)  # mirror below-ground points
+        pts.append([round(x, 4), round(y, 4), round(z, 4)])
+    return pts
 
 
 def _write_block_mesh_dict(case_dir: Path, params: dict) -> None:
@@ -599,6 +635,53 @@ def _write_surface_feature_extract(case_dir: Path) -> None:
     # Change file reference from .obj to .stl
     content = content.replace("motorBike.obj", "motorBike.stl")
     sfed.write_text(content)
+
+
+def _write_streamlines(case_dir: Path, params: dict) -> None:
+    """Overwrite system/streamLines with cloud-type seeds on a sphere."""
+    sl_file = case_dir / "system" / "streamLines"
+    if not sl_file.exists():
+        return
+    center   = params.get("streamline_center", [-1.0, 0.0, 0.5])
+    radius   = params.get("streamline_radius", 0.5)
+    n_points = int(params.get("streamline_n_points", 50))
+    pts = _sphere_seed_points(center, radius, n_points)
+    pts_str = "\n        ".join(f"({p[0]} {p[1]} {p[2]})" for p in pts)
+    content = f"""\
+/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2206                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+
+streamLines
+{{
+    libs            (fieldFunctionObjects);
+    type            streamLine;
+    writeControl    writeTime;
+    setFormat       vtk;
+    trackForward    true;
+    fields (p U k);
+    lifeTime        10000;
+    nSubCycle       5;
+    cloud           particleTracks;
+
+    // Sphere seed: center=({center[0]} {center[1]} {center[2]}) radius={radius} n={n_points}
+    seedSampleSet
+    {{
+        type    cloud;
+        axis    x;
+        points  (
+        {pts_str}
+        );
+    }}
+}}
+
+// ************************************************************************* //
+"""
+    sl_file.write_text(content)
 
 
 def _prepare_les_files(case_dir: Path) -> None:
