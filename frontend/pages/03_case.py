@@ -234,6 +234,9 @@ with right:
             st.caption(t("domain_auto_note"))
         else:
             display_params = params
+        solver_type = sim.get("solver_type", "STEADY")
+        display_params["rho_ref"] = 1.0
+        display_params["turbulence_model"] = "kOmegaSST" if solver_type == "STEADY" else "SpalartAllmarasDDES"
         st.json(display_params, expanded=False)
 
         _chat_section(

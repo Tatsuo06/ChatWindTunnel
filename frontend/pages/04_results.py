@@ -206,6 +206,25 @@ if all_bx:
 st.subheader(t("numerical_data"))
 for geo in data:
     st.markdown(f"**{geo['geo_name']}**")
+    rp = geo.get("ref_params") or {}
+    if rp:
+        cofr = rp.get("cofr")
+        cofr_str = f"({cofr[0]:.3f}, {cofr[1]:.3f}, {cofr[2]:.3f}) m" if cofr else "—"
+        st.caption(
+            f"ρ_ref = {rp.get('rho_ref', 1.0)} kg/m³　　"
+            f"U_ref = {rp.get('velocity_mps')} m/s　　"
+            f"A_ref = {rp.get('aref')} m²　　"
+            f"L_ref = {rp.get('lref')} m　　"
+            f"Moment center = {cofr_str}"
+        )
+    mismatch = geo.get("ref_params_mismatch")
+    if mismatch:
+        all_ref = geo.get("all_ref", [])
+        detail = ", ".join(
+            f"{k}: " + " / ".join(str(r[k]) for r in all_ref if r.get(k) is not None)
+            for k in mismatch
+        )
+        st.warning(f"⚠️ 無次元化パラメータがケース間で一致していません: {detail}")
     rows = []
     for p in geo["points"]:
         bx, by = _body_frame(p)

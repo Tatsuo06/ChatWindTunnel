@@ -7,6 +7,8 @@ from sqlalchemy.orm import selectinload
 
 from backend.api.deps import DB, AdminUser, CurrentUser
 from backend.db.models import Geometry, Project, Simulation, SimulationStatus, UserRole
+import json
+
 from backend.visualization.parsers import parse_force_coefficients
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -125,6 +127,7 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
     out = []
     for geo in geos:
         points = []
+        all_ref: list[dict] = []
         for sim in geo.simulations:
             if sim.status != SimulationStatus.done or not sim.case_dir:
                 continue
@@ -144,9 +147,35 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
                 "Cy": round(float(avg["Cy"]), 4) if "Cy" in avg.index else None,
                 "CmYaw": round(float(avg["CmYaw"]), 4) if "CmYaw" in avg.index else None,
             })
+            case_params_file = Path(sim.case_dir) / "case_params.json"
+            if case_params_file.exists():
+                p = json.loads(case_params_file.read_text())
+            else:
+                p = sim.parameters or {}
+            all_ref.append({
+                "sim_name": sim.name,
+                "velocity_mps": p.get("velocity_mps"),
+                "aref": p.get("aref"),
+                "lref": p.get("lref"),
+                "cofr": p.get("cofr"),
+            })
         if points:
             points.sort(key=lambda x: x["yaw_deg"])
-            out.append({"geo_id": geo.id, "geo_name": geo.name, "points": points})
+            ref_params = {"rho_ref": 1.0, **{k: all_ref[0][k] for k in ("velocity_mps", "aref", "lref", "cofr")}} if all_ref else None
+            # Detect inconsistencies across cases
+            mismatch = []
+            for key in ("velocity_mps", "aref", "lref", "cofr"):
+                vals = [r[key] for r in all_ref if r[key] is not None]
+                if len(set(str(v) for v in vals)) > 1:
+                    mismatch.append(key)
+            out.append({
+                "geo_id": geo.id,
+                "geo_name": geo.name,
+                "points": points,
+                "ref_params": ref_params,
+                "ref_params_mismatch": mismatch or None,
+                "all_ref": all_ref if mismatch else None,
+            })
 
     return out
 

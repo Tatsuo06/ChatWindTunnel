@@ -12,7 +12,16 @@ Upload a CAD file, configure the simulation through natural language chat, submi
 
 ## Screenshots
 
-![Login screen](frontend/static/login.png)
+| | |
+|---|---|
+| **Login** | **Projects** |
+| <img src="frontend/static/login.png" width="400"> | <img src="frontend/static/01_project_page.png" width="400"> |
+| **Geometry upload & preview** | **Case setup** |
+| <img src="frontend/static/02_geometry_page.png" width="400"> | <img src="frontend/static/03_case_setup.png" width="400"> |
+| **Chat-driven configuration** | **Simulation results** |
+| <img src="frontend/static/04_case_setup_chat.png" width="400"> | <img src="frontend/static/05_case_result.png" width="400"> |
+| **AI-assisted result interpretation** | **Yaw sweep summary** |
+| <img src="frontend/static/06_case_result_chat.png" width="400"> | <img src="frontend/static/07_summary.png" width="400"> |
 
 ## Features
 
