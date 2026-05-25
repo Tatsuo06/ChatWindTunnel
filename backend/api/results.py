@@ -228,19 +228,35 @@ async def streamlines(sim_id: int, current_user: CurrentUser, db: DB):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
 
     case_dir = Path(sim.case_dir)
-    # OpenFOAM v2206 writes streamLines to postProcessing/sets/streamLines/
+
+    def _latest_vtk(pattern: str) -> Path | None:
+        files = sorted(
+            case_dir.glob(pattern),
+            key=lambda p: float(p.parent.name) if p.parent.name.replace(".", "").isdigit() else 0,
+        )
+        return files[-1] if files else None
+
+    # Collect forward and backward streamline VTKs (newest time step each)
+    vtk_paths: list[Path] = []
     for pattern in (
         "postProcessing/sets/streamLines/**/*.vtp",
         "postProcessing/streamLines/**/*.vtp",
         "postProcessing/streamLines/**/*.vtk",
     ):
-        vtk_files = sorted(
-            case_dir.glob(pattern),
-            key=lambda p: float(p.parent.name) if p.parent.name.replace(".", "").isdigit() else 0,
-        )
-        if vtk_files:
+        f = _latest_vtk(pattern)
+        if f:
+            vtk_paths.append(f)
             break
-    if not vtk_files:
+    for pattern in (
+        "postProcessing/streamLinesBack/**/*.vtp",
+        "postProcessing/streamLinesBack/**/*.vtk",
+    ):
+        f = _latest_vtk(pattern)
+        if f:
+            vtk_paths.append(f)
+            break
+
+    if not vtk_paths:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No streamline data")
 
     geo_bounds = None
@@ -254,4 +270,6 @@ async def streamlines(sim_id: int, current_user: CurrentUser, db: DB):
             geo_bounds = {"xmin": rb_min[0], "xmax": rb_max[0],
                           "zmin": rb_min[2], "zmax": rb_max[2]}
 
-    return _png(backend.plot_streamlines(vtk_files[-1], geo_bounds=geo_bounds))
+    stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
+    return _png(backend.plot_streamlines(vtk_paths, geo_bounds=geo_bounds,
+                                         stl_path=stl_path if stl_path.exists() else None))

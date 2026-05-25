@@ -244,17 +244,40 @@ class PyVistaBackend(VisualizationBackend):
         pl.close()
         return _array_to_png(img)
 
-    def plot_streamlines(self, vtk_path: Path, geo_bounds: dict | None = None) -> bytes:
+    def plot_streamlines(self, vtk_paths: "Path | list[Path]", geo_bounds: dict | None = None,
+                         stl_path: "Path | None" = None) -> bytes:
         import numpy as np
-        mesh = pv.read(str(vtk_path))
-        # Compute velocity magnitude for coloring
-        if "U" in mesh.point_data and mesh.point_data["U"].ndim == 2:
-            mesh["U_mag"] = np.linalg.norm(mesh.point_data["U"], axis=1)
-            scalars = "U_mag"
-        else:
-            scalars = mesh.array_names[0] if mesh.array_names else None
+
+        if not isinstance(vtk_paths, list):
+            vtk_paths = [vtk_paths]
+
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
-        pl.add_mesh(mesh, scalars=scalars, cmap="plasma", line_width=2, show_scalar_bar=True)
+        scalar_bar_added = False
+
+        for vtk_path in vtk_paths:
+            try:
+                mesh = pv.read(str(vtk_path))
+            except Exception:
+                continue
+            if mesh.n_points == 0:
+                continue
+            if "U" in mesh.point_data and mesh.point_data["U"].ndim == 2:
+                mesh["U_mag"] = np.linalg.norm(mesh.point_data["U"], axis=1)
+                scalars = "U_mag"
+            else:
+                scalars = mesh.array_names[0] if mesh.array_names else None
+            pl.add_mesh(mesh, scalars=scalars, cmap="plasma", line_width=2,
+                        show_scalar_bar=not scalar_bar_added,
+                        clim=[0, None])
+            scalar_bar_added = True
+
+        if stl_path and Path(stl_path).exists():
+            try:
+                stl = pv.read(str(stl_path))
+                pl.add_mesh(stl, color="lightgray", opacity=0.6, smooth_shading=True)
+            except Exception:
+                pass
+
         pl.add_axes()
         pl.view_xz()
         if geo_bounds:

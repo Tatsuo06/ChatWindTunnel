@@ -36,6 +36,7 @@ TOOLS = [
                     "pitch_deg": {"type": "number", "description": "Pitch angle in degrees (vertical tilt)"},
                     "roll_deg": {"type": "number", "description": "Roll angle in degrees (rotation around flow axis)"},
                     "turbulence_intensity": {"type": "number", "description": "Turbulence intensity (0-1), used to compute k and omega"},
+                    "nu": {"type": "number", "description": "Kinematic viscosity in m²/s (default 1.5e-5 for air at 15°C)"},
                 },
                 "required": ["velocity_mps"],
             },
@@ -45,11 +46,16 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_solver_settings",
-            "description": "Set solver type and time control parameters.",
+            "description": "Set solver type, turbulence model, and time control parameters.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "solver_type": {"type": "string", "enum": ["STEADY", "UNSTEADY"]},
+                    "turbulence_model": {
+                        "type": "string",
+                        "enum": ["kOmegaSST", "SpalartAllmaras", "realizableKE"],
+                        "description": "RANS turbulence model (default kOmegaSST). kOmegaSST recommended for most cases; realizableKE for k-epsilon style.",
+                    },
                     "end_time": {"type": "number", "description": "Number of iterations (steady) or physical end time in seconds (unsteady)"},
                     "delta_t": {"type": "number", "description": "Time step size in seconds (unsteady only)"},
                     "n_processors": {"type": "integer", "description": "Number of parallel processors"},
@@ -198,6 +204,8 @@ def _execute_tool(
     if tool_name == "set_flow_conditions":
         if "velocity_mps" in tool_args:
             params["velocity_mps"] = tool_args["velocity_mps"]
+        if "nu" in tool_args:
+            params["nu"] = tool_args["nu"]
         if "turbulence_intensity" in tool_args:
             turb = _turbulence_from_intensity(
                 params["velocity_mps"], tool_args["turbulence_intensity"]
@@ -205,6 +213,7 @@ def _execute_tool(
             params.update(turb)
         result = (
             f"Flow conditions set: velocity={params['velocity_mps']} m/s, "
+            f"nu={params.get('nu', 1.5e-5):.3g} m²/s, "
             f"k={params.get('turbulent_ke')}, ω={params.get('turbulent_omega')}"
         )
         yaw = tool_args.get("yaw_deg")
@@ -216,6 +225,8 @@ def _execute_tool(
         params.update({k: v for k, v in tool_args.items() if k in ("end_time", "delta_t", "n_processors")})
         if "solver_type" in tool_args:
             params["solver_type"] = tool_args["solver_type"]
+        if "turbulence_model" in tool_args:
+            params["turbulence_model"] = tool_args["turbulence_model"]
         return params, f"Solver settings updated: {tool_args}", {}, [], None
 
     if tool_name == "set_mesh_settings":

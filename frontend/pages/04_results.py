@@ -25,15 +25,38 @@ if not data:
     st.info(t("no_done_cases"))
     st.stop()
 
-def _body_frame(p: dict) -> tuple[float | None, float | None]:
-    """Convert wind-axis Cx/Cy to body-frame Cx(b)/Cy(b)."""
+# Geometry filter
+geo_names = [geo["geo_name"] for geo in data]
+selected_geos = st.multiselect(
+    t("select_geometries"),
+    options=geo_names,
+    default=geo_names,
+)
+data = [geo for geo in data if geo["geo_name"] in selected_geos]
+if not data:
+    st.info(t("no_done_cases"))
+    st.stop()
+
+
+def _body_frame(p: dict) -> tuple[float | None, float | None, float | None, float | None]:
+    """Convert wind-axis coefficients to SAE body-frame (forward=+X, down=+Z).
+
+    bx = -(Cx·cos ψ − Cy·sin ψ)   forward is +X (negate wind-axis drag direction)
+    by =   Cx·sin ψ + Cy·cos ψ     lateral Y unchanged
+    bz = -Cz                        down is +Z (negate wind-axis lift direction)
+    bmz = -CmYaw                    yaw moment sign flips with Z reversal
+    """
     cx, cy, yaw = p.get("Cx"), p.get("Cy"), p.get("yaw_deg", 0.0)
+    cz    = p.get("Cz")
+    cmyaw = p.get("CmYaw")
     if cx is None or cy is None:
-        return None, None
+        return None, None, None, None
     psi = math.radians(yaw)
-    bx = cx * math.cos(psi) - cy * math.sin(psi)
-    by = cx * math.sin(psi) + cy * math.cos(psi)
-    return round(bx, 4), round(by, 4)
+    bx  = round(-(cx * math.cos(psi) - cy * math.sin(psi)), 4)
+    by  = round(  cx * math.sin(psi) + cy * math.cos(psi),  4)
+    bz  = round(-cz,    4) if cz    is not None else None
+    bmz = round(-cmyaw, 4) if cmyaw is not None else None
+    return bx, by, bz, bmz
 
 
 # Collect all values to set sensible defaults
@@ -41,8 +64,10 @@ all_cx    = [p["Cx"]    for geo in data for p in geo["points"] if p.get("Cx")   
 all_cz    = [p["Cz"]    for geo in data for p in geo["points"] if p.get("Cz")    is not None]
 all_cy    = [p["Cy"]    for geo in data for p in geo["points"] if p.get("Cy")    is not None]
 all_cmyaw = [p["CmYaw"] for geo in data for p in geo["points"] if p.get("CmYaw") is not None]
-all_bx = [_body_frame(p)[0] for geo in data for p in geo["points"] if _body_frame(p)[0] is not None]
-all_by = [_body_frame(p)[1] for geo in data for p in geo["points"] if _body_frame(p)[1] is not None]
+all_bx  = [_body_frame(p)[0] for geo in data for p in geo["points"] if _body_frame(p)[0] is not None]
+all_by  = [_body_frame(p)[1] for geo in data for p in geo["points"] if _body_frame(p)[1] is not None]
+all_bcz = [_body_frame(p)[2] for geo in data for p in geo["points"] if _body_frame(p)[2] is not None]
+all_bcmyaw = [_body_frame(p)[3] for geo in data for p in geo["points"] if _body_frame(p)[3] is not None]
 
 
 def _axis_controls(key_prefix: str, values: list[float]) -> tuple[float | None, float | None]:
@@ -164,7 +189,7 @@ if all_bx:
         for geo in data:
             xs, ys, texts = [], [], []
             for p in geo["points"]:
-                bx, _ = _body_frame(p)
+                bx, _, _, _ = _body_frame(p)
                 if bx is not None:
                     xs.append(p["yaw_deg"]); ys.append(bx)
                     texts.append(f"{p['sim_name']}<br>Cx(b)={bx}")
@@ -186,7 +211,7 @@ if all_bx:
         for geo in data:
             xs, ys, texts = [], [], []
             for p in geo["points"]:
-                _, by = _body_frame(p)
+                _, by, _, _ = _body_frame(p)
                 if by is not None:
                     xs.append(p["yaw_deg"]); ys.append(by)
                     texts.append(f"{p['sim_name']}<br>Cy(b)={by}")
@@ -201,6 +226,55 @@ if all_bx:
             yaxis=dict(range=[by_ymin, by_ymax] if by_ymin is not None else None),
         )
         st.plotly_chart(fig_by, use_container_width=True)
+
+    if all_bcz or all_bcmyaw:
+        col_bcz, col_bcmyaw = st.columns(2)
+
+        if all_bcz:
+            with col_bcz:
+                bcz_ymin, bcz_ymax = _axis_controls("bcz", all_bcz)
+                fig_bcz = go.Figure()
+                for geo in data:
+                    xs, ys, texts = [], [], []
+                    for p in geo["points"]:
+                        _, _, bz, _ = _body_frame(p)
+                        if bz is not None:
+                            xs.append(p["yaw_deg"]); ys.append(bz)
+                            texts.append(f"{p['sim_name']}<br>Cz(b)={bz}")
+                    if xs:
+                        fig_bcz.add_trace(go.Scatter(
+                            x=xs, y=ys, mode="lines+markers",
+                            name=geo["geo_name"], text=texts, hoverinfo="text", marker=dict(size=8),
+                        ))
+                fig_bcz.update_layout(
+                    title=t("cz_body_chart_title"), xaxis_title=t("xaxis_yaw"), yaxis_title="Cz(b)",
+                    template="plotly_white", height=380, legend_title=t("legend_geo"),
+                    yaxis=dict(range=[bcz_ymin, bcz_ymax] if bcz_ymin is not None else None),
+                )
+                st.plotly_chart(fig_bcz, use_container_width=True)
+
+        if all_bcmyaw:
+            with col_bcmyaw:
+                bcmyaw_ymin, bcmyaw_ymax = _axis_controls("bcmyaw", all_bcmyaw)
+                fig_bcmyaw = go.Figure()
+                for geo in data:
+                    xs, ys, texts = [], [], []
+                    for p in geo["points"]:
+                        _, _, _, bmz = _body_frame(p)
+                        if bmz is not None:
+                            xs.append(p["yaw_deg"]); ys.append(bmz)
+                            texts.append(f"{p['sim_name']}<br>CmYaw(b)={bmz}")
+                    if xs:
+                        fig_bcmyaw.add_trace(go.Scatter(
+                            x=xs, y=ys, mode="lines+markers",
+                            name=geo["geo_name"], text=texts, hoverinfo="text", marker=dict(size=8),
+                        ))
+                fig_bcmyaw.update_layout(
+                    title=t("cmyaw_body_chart_title"), xaxis_title=t("xaxis_yaw"), yaxis_title="CmYaw(b)",
+                    template="plotly_white", height=380, legend_title=t("legend_geo"),
+                    yaxis=dict(range=[bcmyaw_ymin, bcmyaw_ymax] if bcmyaw_ymin is not None else None),
+                )
+                st.plotly_chart(fig_bcmyaw, use_container_width=True)
 
 # ── Data table ─────────────────────────────────────────────────
 st.subheader(t("numerical_data"))
@@ -227,11 +301,11 @@ for geo in data:
         st.warning(f"⚠️ 無次元化パラメータがケース間で一致していません: {detail}")
     rows = []
     for p in geo["points"]:
-        bx, by = _body_frame(p)
+        bx, by, bz, bmz = _body_frame(p)
         rows.append({
             t("col_case"): p["sim_name"], t("col_yaw"): p["yaw_deg"],
             t("col_pitch"): p["pitch_deg"], t("col_roll"): p.get("roll_deg", 0.0),
             "Cx": p["Cx"], "Cy": p.get("Cy"), "Cz": p["Cz"], "CmYaw": p.get("CmYaw"),
-            "Cx(b)": bx, "Cy(b)": by,
+            "Cx(b)": bx, "Cy(b)": by, "Cz(b)": bz, "CmYaw(b)": bmz,
         })
     st.dataframe(rows, use_container_width=True, hide_index=True)

@@ -176,10 +176,42 @@ Implemented in `case_builder._refbox_from_rotated_stl()`. Called in `build_case(
 
 **Case building**: `foam/case_builder.py` uses regex `_replace_value()` to modify OpenFOAM dictionary files rather than foamlib's dict API, because the template files use `#include` directives that foamlib cannot always resolve. snappyHexMeshDict geometry names are rewritten from `motorBike` to `object` to match the uploaded geometry.
 
+## Turbulence Models
+
+The steady-state solver (simpleFoam) supports three RANS models selectable via `turbulence_model` in simulation parameters or via chat (`set_solver_settings`). The default is `kOmegaSST`.
+
+| Model | Parameter value | Fields | Stability (bluff body) |
+|---|---|---|---|
+| k-ω SST | `kOmegaSST` | k, omega, nut | ✅ Excellent — default |
+| Spalart-Allmaras | `SpalartAllmaras` | nuTilda, nut | ✅ Good — one-equation, fast |
+| Realizable k-ε | `realizableKE` | k, epsilon, nut | ✅ Good — stable k-ε variant |
+
+**What `case_builder.py` does at build time** (`_apply_spalart_allmaras` / `_apply_kepsilon`):
+
+For **SpalartAllmaras**:
+- `constant/turbulenceProperties`: `RASModel SpalartAllmaras`
+- `0.orig/nuTilda`: created; `fixedValue 0` at walls; `$nuTildaInlet` at inlet
+- `0.orig/k`, `0.orig/omega`: removed
+- `0.orig/include/initialConditions`: `nuTildaInlet = 3 × ν` (e.g. 4.5×10⁻⁵ for air)
+- `system/fvSchemes`: `div(phi,k)` + `div(phi,omega)` → `div(phi,nuTilda)`
+- `system/fvSolution`: k/omega solvers and relaxation → nuTilda
+
+For **realizableKE**:
+- `constant/turbulenceProperties`: `RASModel realizableKE`
+- `0.orig/epsilon`: created; `epsilonWallFunction` at walls; `$turbulentEpsilon` at inlet
+- `0.orig/omega`: removed; `0.orig/k` kept unchanged
+- `0.orig/include/initialConditions`: `turbulentEpsilon = Cμ^(3/4) × k^(3/2) / L`  where `L = 0.07 × lref`
+- `system/fvSchemes`: `div(phi,omega)` → `div(phi,epsilon)`
+- `system/fvSolution`: omega solver and relaxation → epsilon
+
+**streamLines** `fields` entry is automatically set to `(p U k)`, `(p U nuTilda)`, or `(p U epsilon)` to match the active model.
+
+**Why not standard kEpsilon**: Local tests on bluff body geometry (m5480) showed kEpsilon and RNGkEpsilon both diverge at iteration ~8–10 when starting from potentialFoam initial conditions. The epsilon production at walls overwhelms dissipation. realizableKE avoids this via variable Cμ (realizability constraint). Standard kEpsilon is not exposed in the UI.
+
 ## OpenFOAM Templates
 
 ### Steady (motorBike / simpleFoam)
-- Turbulence: kOmegaSST
+- Default turbulence: kOmegaSST (switchable — see Turbulence Models section above)
 - Wind tunnel: X[-5,15] Y[-4,4] Z[0,8] m; inlet on -X face, outlet on +X face
 - Key params written by case_builder: `flowVelocity`, `turbulentKE`, `turbulentOmega`, `endTime`, `numberOfSubdomains`, snappyHexMesh refinement levels, `forceCoeffs` Aref/lRef/CofR
 - Outputs: `postProcessing/cuttingPlane/` (p,U on y=0), `postProcessing/streamLines/`, `postProcessing/forceCoeffs1/`

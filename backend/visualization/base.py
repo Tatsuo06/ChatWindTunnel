@@ -18,9 +18,13 @@ class VisualizationBackend(ABC):
         """Plot Cd/Cl/Cm time series from forceCoeffs postProcessing. Returns PNG bytes."""
 
     @abstractmethod
-    def plot_cutting_plane(self, vtk_path: Path, field: str = "p") -> bytes:
+    def plot_cutting_plane(self, vtk_path: Path, field: str = "p",
+                           geo_bounds: dict | None = None,
+                           stl_path: Path | None = None) -> bytes:
         """Render cutting plane (VTK) for a given field. Returns PNG bytes."""
 
     @abstractmethod
-    def plot_streamlines(self, vtk_path: Path) -> bytes:
-        """Render streamlines (VTK). Returns PNG bytes."""
+    def plot_streamlines(self, vtk_paths: Path | list[Path], geo_bounds: dict | None = None,
+                         stl_path: Path | None = None) -> bytes:
+        """Render streamlines (VTK). vtk_paths may be a single path or a list (forward+backward).
+        Returns PNG bytes."""

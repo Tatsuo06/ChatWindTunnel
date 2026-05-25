@@ -214,6 +214,7 @@ def build_case(
 
     # Write OpenFOAM parameter files
     _write_initial_conditions(case_dir, params)
+    _write_transport_properties(case_dir, params)
     _write_control_dict(case_dir, solver_type, params)
     _write_decompose_par(case_dir, params)
     _write_block_mesh_dict(case_dir, params)
@@ -221,6 +222,12 @@ def build_case(
     _write_snappy_hex_mesh(case_dir, params)
     _write_surface_feature_extract(case_dir)
     _write_streamlines(case_dir, params)
+
+    turb_model = params.get("turbulence_model", "kOmegaSST")
+    if turb_model == "SpalartAllmaras":
+        _apply_spalart_allmaras(case_dir)
+    elif turb_model == "realizableKE":
+        _apply_kepsilon(case_dir, "realizableKE")
 
     # Empty .foam file required by pyvista.OpenFOAMReader
     (case_dir / "case.foam").touch()
@@ -280,13 +287,28 @@ def _write_initial_conditions(case_dir: Path, params: dict) -> None:
     flow_velocity = f"({velocity} 0 0)"
     lref = params.get("lref", 1.0)
     intensity = params.get("turbulence_intensity", 0.05)
-    turbulent_ke, turbulent_omega = _turbulence_from_velocity(velocity, intensity, lref)
+    turbulence_model = params.get("turbulence_model", "kOmegaSST")
 
     ic_path = case_dir / "0.orig" / "include" / "initialConditions"
     content = ic_path.read_text()
     content = _set_value(content, "flowVelocity", flow_velocity)
-    content = _set_value(content, "turbulentKE", str(turbulent_ke))
-    content = _set_value(content, "turbulentOmega", str(turbulent_omega))
+
+    if turbulence_model == "SpalartAllmaras":
+        nu = params.get("nu", 1.5e-5)
+        nu_tilda_inlet = round(3.0 * nu, 8)
+        content = re.sub(r"turbulentKE\s+[^;]+;", f"nuTildaInlet         {nu_tilda_inlet:.6g};", content)
+        content = re.sub(r"turbulentOmega\s+[^;]+;", "", content)
+        content = re.sub(r"\n{3,}", "\n\n", content)
+    elif turbulence_model == "realizableKE":
+        turbulent_ke, _ = _turbulence_from_velocity(velocity, intensity, lref)
+        turbulent_epsilon = _turbulence_epsilon_from_velocity(velocity, intensity, lref)
+        content = _set_value(content, "turbulentKE", str(turbulent_ke))
+        content = re.sub(r"turbulentOmega\s+[^;]+;", f"turbulentEpsilon     {turbulent_epsilon};", content)
+    else:
+        turbulent_ke, turbulent_omega = _turbulence_from_velocity(velocity, intensity, lref)
+        content = _set_value(content, "turbulentKE", str(turbulent_ke))
+        content = _set_value(content, "turbulentOmega", str(turbulent_omega))
+
     ic_path.write_text(content)
 
 
@@ -531,6 +553,220 @@ def _sphere_seed_points(center: list, radius: float, n_points: int) -> list[list
     return pts
 
 
+def _upstream_grid_seeds(center: list, radius: float, x_upstream: float,
+                          n_grid: int = 5) -> list[list[float]]:
+    """Generate a uniform grid of seed points on a y-z plane upstream of the geometry."""
+    pts = []
+    y_vals = [round(center[1] + radius * (-1 + 2 * i / (n_grid - 1)), 4) for i in range(n_grid)]
+    z_max = round(center[2] + radius, 4)
+    z_min = round(max(0.01, center[2] - radius), 4)
+    z_vals = [round(z_min + (z_max - z_min) * i / (n_grid - 1), 4) for i in range(n_grid)]
+    for y in y_vals:
+        for z in z_vals:
+            pts.append([round(x_upstream, 4), y, z])
+    return pts
+
+
+_NUTILDA_FIELD = """\
+/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2206                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      nuTilda;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include        "include/initialConditions"
+
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform $nuTildaInlet;
+
+boundaryField
+{{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    #include "include/fixedInlet"
+
+    outlet
+    {{
+        type            zeroGradient;
+    }}
+
+    lowerWall
+    {{
+        type            fixedValue;
+        value           uniform 0;
+    }}
+
+    motorBikeGroup
+    {{
+        type            fixedValue;
+        value           uniform 0;
+    }}
+
+    #include "include/frontBackUpperPatches"
+}}
+
+
+// ************************************************************************* //
+"""
+
+
+def _apply_spalart_allmaras(case_dir: Path) -> None:
+    """Convert a kOmegaSST case directory to use SpalartAllmaras turbulence model.
+
+    Changes:
+    - constant/turbulenceProperties: RASModel kOmegaSST → SpalartAllmaras
+    - 0.orig/nuTilda: created with fixedValue 0 wall BCs
+    - 0.orig/k, 0.orig/omega: removed
+    - system/fvSchemes: div(phi,k) + div(phi,omega) → div(phi,nuTilda)
+    - system/fvSolution: k/omega solvers/relaxation → nuTilda
+    """
+    # turbulenceProperties
+    tp = case_dir / "constant" / "turbulenceProperties"
+    tp.write_text(tp.read_text().replace("kOmegaSST", "SpalartAllmaras", 1))
+
+    # 0.orig/nuTilda
+    (case_dir / "0.orig" / "nuTilda").write_text(_NUTILDA_FIELD)
+
+    # Remove k and omega fields
+    for fname in ("k", "omega"):
+        f = case_dir / "0.orig" / fname
+        if f.exists():
+            f.unlink()
+
+    # fvSchemes: replace div(phi,k) and div(phi,omega) with div(phi,nuTilda)
+    fvs_path = case_dir / "system" / "fvSchemes"
+    fvs = fvs_path.read_text()
+    fvs = re.sub(r"[ \t]*div\(phi,k\)\s+[^\n]+\n", "", fvs)
+    fvs = re.sub(r"[ \t]*div\(phi,omega\)\s+[^\n]+\n", "    div(phi,nuTilda) $turbulence;\n", fvs)
+    fvs_path.write_text(fvs)
+
+    # fvSolution: replace k/omega solvers and relaxation with nuTilda
+    fvsol_path = case_dir / "system" / "fvSolution"
+    fvsol = fvsol_path.read_text()
+    # Remove k solver block
+    fvsol = re.sub(r"\n    k\s*\{[^}]+\}", "", fvsol)
+    # Replace omega solver block with nuTilda
+    fvsol = re.sub(r"(\n    )omega(\s*\{)", r"\1nuTilda\2", fvsol)
+    # Replace relaxation entries
+    fvsol = re.sub(r"[ \t]*k\s+[0-9.]+;\n", "", fvsol)
+    fvsol = re.sub(r"([ \t]*)omega(\s+[0-9.]+;)", r"\1nuTilda\2", fvsol)
+    fvsol_path.write_text(fvsol)
+
+
+_EPSILON_FIELD = """\
+/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  v2206                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      epsilon;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include        "include/initialConditions"
+
+dimensions      [0 2 -3 0 0 0 0];
+
+internalField   uniform $turbulentEpsilon;
+
+boundaryField
+{{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    #include "include/fixedInlet"
+
+    outlet
+    {{
+        type            inletOutlet;
+        inletValue      $internalField;
+        value           $internalField;
+    }}
+
+    lowerWall
+    {{
+        type            epsilonWallFunction;
+        value           $internalField;
+    }}
+
+    motorBikeGroup
+    {{
+        type            epsilonWallFunction;
+        value           $internalField;
+    }}
+
+    #include "include/frontBackUpperPatches"
+}}
+
+
+// ************************************************************************* //
+"""
+
+
+def _turbulence_epsilon_from_velocity(
+    velocity: float, intensity: float = 0.05, lref: float = 1.0
+) -> float:
+    """Compute epsilon from velocity, intensity and reference length.
+    epsilon = Cmu^(3/4) * k^(3/2) / L  where L = 0.07 * lref.
+    """
+    k = 1.5 * (velocity * intensity) ** 2
+    L = 0.07 * lref
+    return round(0.09 ** 0.75 * k ** 1.5 / L, 6)
+
+
+def _apply_kepsilon(case_dir: Path, model_name: str = "realizableKE") -> None:
+    """Convert a kOmegaSST case directory to a k-epsilon variant (realizableKE).
+
+    Changes:
+    - constant/turbulenceProperties: kOmegaSST → model_name
+    - 0.orig/epsilon: created with epsilonWallFunction at walls
+    - 0.orig/omega: removed
+    - system/fvSchemes: div(phi,omega) → div(phi,epsilon)
+    - system/fvSolution: omega solver/relaxation → epsilon
+    """
+    # turbulenceProperties
+    tp = case_dir / "constant" / "turbulenceProperties"
+    tp.write_text(tp.read_text().replace("kOmegaSST", model_name, 1))
+
+    # 0.orig/epsilon
+    (case_dir / "0.orig" / "epsilon").write_text(_EPSILON_FIELD)
+
+    # Remove omega field
+    omega_f = case_dir / "0.orig" / "omega"
+    if omega_f.exists():
+        omega_f.unlink()
+
+    # fvSchemes: replace div(phi,omega) with div(phi,epsilon)
+    fvs_path = case_dir / "system" / "fvSchemes"
+    fvs = fvs_path.read_text()
+    fvs = re.sub(r"[ \t]*div\(phi,omega\)\s+[^\n]+\n", "    div(phi,epsilon) $turbulence;\n", fvs)
+    fvs_path.write_text(fvs)
+
+    # fvSolution: replace omega solver and relaxation with epsilon
+    fvsol_path = case_dir / "system" / "fvSolution"
+    fvsol = fvsol_path.read_text()
+    fvsol = re.sub(r"(\n    )omega(\s*\{)", r"\1epsilon\2", fvsol)
+    fvsol = re.sub(r"([ \t]*)omega(\s+[0-9.]+;)", r"\1epsilon\2", fvsol)
+    fvsol_path.write_text(fvsol)
+
+
 def _write_block_mesh_dict(case_dir: Path, params: dict) -> None:
     scale  = params.get("domain_scale",  1)
     xmin   = params.get("domain_xmin",  -5)
@@ -637,16 +873,44 @@ def _write_surface_feature_extract(case_dir: Path) -> None:
     sfed.write_text(content)
 
 
+def _write_transport_properties(case_dir: Path, params: dict) -> None:
+    """Write kinematic viscosity nu to constant/transportProperties."""
+    nu = params.get("nu", 1.5e-5)
+    tp = case_dir / "constant" / "transportProperties"
+    if not tp.exists():
+        return
+    tp.write_text(_set_value(tp.read_text(), "nu", f"{nu:.6g}"))
+
+
 def _write_streamlines(case_dir: Path, params: dict) -> None:
-    """Overwrite system/streamLines with cloud-type seeds on a sphere."""
+    """Write system/streamLines with two function objects sharing sphere seeds.
+
+    streamLines     — trackForward true  (downstream)
+    streamLinesBack — trackForward false (upstream)
+    Both use the same Fibonacci-sphere seed cloud around the geometry.
+    """
     sl_file = case_dir / "system" / "streamLines"
     if not sl_file.exists():
         return
     center   = params.get("streamline_center", [-1.0, 0.0, 0.5])
     radius   = params.get("streamline_radius", 0.5)
     n_points = int(params.get("streamline_n_points", 50))
+    _tm = params.get("turbulence_model", "kOmegaSST")
+    turb_field = "nuTilda" if _tm == "SpalartAllmaras" else ("epsilon" if _tm == "realizableKE" else "k")
+
     pts = _sphere_seed_points(center, radius, n_points)
     pts_str = "\n        ".join(f"({p[0]} {p[1]} {p[2]})" for p in pts)
+
+    seed_block = f"""\
+    seedSampleSet
+    {{
+        type    cloud;
+        axis    x;
+        points  (
+        {pts_str}
+        );
+    }}"""
+
     content = f"""\
 /*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
@@ -656,6 +920,8 @@ def _write_streamlines(case_dir: Path, params: dict) -> None:
 |    \\\\/     M anipulation  |                                                 |
 \\*---------------------------------------------------------------------------*/
 
+// Seeds: sphere center=({center[0]} {center[1]} {center[2]}) r={radius} n={n_points}
+
 streamLines
 {{
     libs            (fieldFunctionObjects);
@@ -663,20 +929,25 @@ streamLines
     writeControl    writeTime;
     setFormat       vtk;
     trackForward    true;
-    fields (p U k);
+    fields          (p U {turb_field});
     lifeTime        10000;
     nSubCycle       5;
     cloud           particleTracks;
+{seed_block}
+}}
 
-    // Sphere seed: center=({center[0]} {center[1]} {center[2]}) radius={radius} n={n_points}
-    seedSampleSet
-    {{
-        type    cloud;
-        axis    x;
-        points  (
-        {pts_str}
-        );
-    }}
+streamLinesBack
+{{
+    libs            (fieldFunctionObjects);
+    type            streamLine;
+    writeControl    writeTime;
+    setFormat       vtk;
+    trackForward    false;
+    fields          (p U {turb_field});
+    lifeTime        10000;
+    nSubCycle       5;
+    cloud           particleTracksBack;
+{seed_block}
 }}
 
 // ************************************************************************* //

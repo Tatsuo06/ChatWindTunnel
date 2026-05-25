@@ -235,8 +235,10 @@ with right:
         else:
             display_params = params
         solver_type = sim.get("solver_type", "STEADY")
+        display_params["nu"] = display_params.get("nu", 1.5e-5)
         display_params["rho_ref"] = 1.0
-        display_params["turbulence_model"] = "kOmegaSST" if solver_type == "STEADY" else "SpalartAllmarasDDES"
+        default_turb = "kOmegaSST" if solver_type == "STEADY" else "SpalartAllmarasDDES"
+        display_params["turbulence_model"] = display_params.get("turbulence_model", default_turb)
         st.json(display_params, expanded=False)
 
         _chat_section(

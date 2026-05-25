@@ -45,6 +45,8 @@ DEFAULT_PARAMETERS = {
     # Surface refinement levels
     "refinement_min": 5,
     "refinement_max": 6,
+    # Turbulence model
+    "turbulence_model": "kOmegaSST",
 }
 
 
