@@ -251,10 +251,11 @@ class PyVistaBackend(VisualizationBackend):
         if not isinstance(vtk_paths, list):
             vtk_paths = [vtk_paths]
 
+        cmaps = ["plasma", "cool"]  # forward=plasma, backward=cool (blue tone)
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
         scalar_bar_added = False
 
-        for vtk_path in vtk_paths:
+        for idx, vtk_path in enumerate(vtk_paths):
             try:
                 mesh = pv.read(str(vtk_path))
             except Exception:
@@ -266,7 +267,8 @@ class PyVistaBackend(VisualizationBackend):
                 scalars = "U_mag"
             else:
                 scalars = mesh.array_names[0] if mesh.array_names else None
-            pl.add_mesh(mesh, scalars=scalars, cmap="plasma", line_width=2,
+            cmap = cmaps[idx % len(cmaps)]
+            pl.add_mesh(mesh, scalars=scalars, cmap=cmap, line_width=2,
                         show_scalar_bar=not scalar_bar_added,
                         clim=[0, None])
             scalar_bar_added = True
@@ -274,7 +276,7 @@ class PyVistaBackend(VisualizationBackend):
         if stl_path and Path(stl_path).exists():
             try:
                 stl = pv.read(str(stl_path))
-                pl.add_mesh(stl, color="lightgray", opacity=0.6, smooth_shading=True)
+                pl.add_mesh(stl, color="lightgray", opacity=0.4, smooth_shading=True)
             except Exception:
                 pass
 
