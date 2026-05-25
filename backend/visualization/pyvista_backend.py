@@ -251,11 +251,11 @@ class PyVistaBackend(VisualizationBackend):
         if not isinstance(vtk_paths, list):
             vtk_paths = [vtk_paths]
 
-        cmaps = ["plasma", "cool"]  # forward=plasma, backward=cool (blue tone)
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
-        scalar_bar_added = False
 
-        for idx, vtk_path in enumerate(vtk_paths):
+        # Load all meshes first to compute global U_mag range
+        meshes = []
+        for vtk_path in vtk_paths:
             try:
                 mesh = pv.read(str(vtk_path))
             except Exception:
@@ -264,13 +264,21 @@ class PyVistaBackend(VisualizationBackend):
                 continue
             if "U" in mesh.point_data and mesh.point_data["U"].ndim == 2:
                 mesh["U_mag"] = np.linalg.norm(mesh.point_data["U"], axis=1)
-                scalars = "U_mag"
-            else:
-                scalars = mesh.array_names[0] if mesh.array_names else None
-            cmap = cmaps[idx % len(cmaps)]
-            pl.add_mesh(mesh, scalars=scalars, cmap=cmap, line_width=2,
+            meshes.append(mesh)
+
+        u_max = max(
+            (float(m["U_mag"].max()) for m in meshes if "U_mag" in m.point_data),
+            default=None,
+        )
+        clim = [0, u_max]
+
+        scalar_bar_added = False
+        for mesh in meshes:
+            scalars = "U_mag" if "U_mag" in mesh.point_data else (
+                mesh.array_names[0] if mesh.array_names else None)
+            pl.add_mesh(mesh, scalars=scalars, cmap="jet", line_width=2,
                         show_scalar_bar=not scalar_bar_added,
-                        clim=[0, None])
+                        clim=clim)
             scalar_bar_added = True
 
         if stl_path and Path(stl_path).exists():
