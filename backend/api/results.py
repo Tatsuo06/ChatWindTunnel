@@ -248,6 +248,7 @@ async def streamlines(sim_id: int, current_user: CurrentUser, db: DB):
             vtk_paths.append(f)
             break
     for pattern in (
+        "postProcessing/sets/streamLinesBack/**/*.vtp",
         "postProcessing/streamLinesBack/**/*.vtp",
         "postProcessing/streamLinesBack/**/*.vtk",
     ):
