@@ -402,29 +402,65 @@ with right:
                 try:
                     import pyvista as pv
                     import numpy as np
-                    from stpyvista import stpyvista
+                    import plotly.graph_objects as go
+
                     paths = api.get_streamlines_paths(sim_id)
                     if paths:
-                        cmaps = ["plasma", "cool"]
-                        pl = pv.Plotter(window_size=[900, 500])
-                        meshes = []
-                        for vp in paths["vtk_paths"]:
-                            m = pv.read(vp)
-                            if m.n_points > 0 and "U" in m.point_data and m.point_data["U"].ndim == 2:
-                                m["U_mag"] = np.linalg.norm(m.point_data["U"], axis=1)
-                            meshes.append(m)
-                        u_max = max((float(m["U_mag"].max()) for m in meshes if "U_mag" in m.point_data), default=None)
-                        clim = [0, u_max]
-                        for idx, m in enumerate(meshes):
-                            if m.n_points == 0:
+                        fig = go.Figure()
+                        all_u_mag = []
+                        track_data = []
+
+                        for vtp_path in paths["vtk_paths"]:
+                            mesh = pv.read(vtp_path)
+                            if mesh.n_points == 0:
                                 continue
-                            scalars = "U_mag" if "U_mag" in m.point_data else (m.array_names[0] if m.array_names else None)
-                            pl.add_mesh(m, scalars=scalars, cmap="jet", line_width=2, clim=clim, show_scalar_bar=(idx == 0))
-                        if paths.get("stl_path"):
-                            stl = pv.read(paths["stl_path"])
-                            pl.add_mesh(stl, color="lightgray", opacity=0.4, smooth_shading=True)
-                        pl.view_xz()
-                        stpyvista(pl, key=f"stream3d_{sim_id}")
+                            if "U" in mesh.point_data and mesh.point_data["U"].ndim == 2:
+                                u_mag = np.linalg.norm(mesh.point_data["U"], axis=1)
+                            else:
+                                u_mag = None
+                            all_u_mag.append(u_mag)
+                            track_data.append((mesh, u_mag))
+
+                        u_max = max(
+                            (float(u.max()) for u in all_u_mag if u is not None),
+                            default=1.0,
+                        )
+
+                        for mesh, u_mag in track_data:
+                            pts = mesh.points
+                            # 各トラック（セル）を個別のラインとして描画
+                            for i in range(mesh.n_cells):
+                                cell = mesh.get_cell(i)
+                                idx = [cell.point_ids[j] for j in range(cell.n_points)]
+                                x = pts[idx, 0].tolist() + [None]
+                                y = pts[idx, 1].tolist() + [None]
+                                z = pts[idx, 2].tolist() + [None]
+                                if u_mag is not None:
+                                    color_vals = (u_mag[idx] / u_max).tolist() + [float("nan")]
+                                else:
+                                    color_vals = None
+                                fig.add_trace(go.Scatter3d(
+                                    x=x, y=y, z=z,
+                                    mode="lines",
+                                    line=dict(
+                                        width=2,
+                                        color=color_vals if color_vals else "orange",
+                                        colorscale="Jet",
+                                        cmin=0, cmax=1,
+                                    ),
+                                    showlegend=False,
+                                    hoverinfo="skip",
+                                ))
+
+                        fig.update_layout(
+                            scene=dict(
+                                xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
+                                aspectmode="data",
+                            ),
+                            height=600,
+                            margin=dict(l=0, r=0, t=0, b=0),
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.info(t("stream_not_found"))
                 except Exception as e:
