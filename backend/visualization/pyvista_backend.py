@@ -110,7 +110,9 @@ class PyVistaBackend(VisualizationBackend):
 
         if field == "mesh":
             pl.set_background("white")
-            pl.add_mesh(mesh, style="wireframe", color="#444444", line_width=0.5)
+            pl.add_mesh(mesh, show_edges=True,
+                        color=[0.95, 0.95, 0.95], edge_color=[0.4, 0.4, 0.4],
+                        line_width=0.5, ambient=1.0, diffuse=0.0, specular=0.0)
         else:
             scalars = (field if field in mesh.point_data
                        else field if field in mesh.cell_data
