@@ -67,12 +67,13 @@ def _rsync_up(local_dir: Path, remote_dir: str) -> None:
 
 
 def _rsync_down(remote_dir: str, local_dir: Path) -> None:
-    """Download cluster remote_dir to local_dir via rsync, skipping processor*/."""
+    """Download cluster remote_dir to local_dir via rsync, skipping processor*/ and ensightWrite/."""
     key = str(Path(settings.CLUSTER_SSH_KEY).expanduser())
     remote = f"{settings.CLUSTER_USER}@{settings.CLUSTER_HOST}:{remote_dir}/"
     subprocess.run(
         ["rsync", "-az",
          "--exclude=processor[0-9]*",
+         "--exclude=postProcessing/ensightWrite",
          "-e", f"ssh -i {key} -o StrictHostKeyChecking=no -o BatchMode=yes",
          remote, f"{local_dir}/"],
         check=True,
