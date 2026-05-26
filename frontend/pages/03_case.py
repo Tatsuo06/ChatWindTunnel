@@ -74,6 +74,14 @@ with left:
     st.subheader(t("cases_title"))
     sims = api.list_simulations(geo_id)
 
+    # Auto-create a default case if none exist so chat is immediately usable
+    if not sims and not st.session_state.get("_autocreated_geo", 0) == geo_id:
+        default = api.create_simulation(geo_id, "case_01", "STEADY")
+        if default:
+            st.session_state["sim_id"] = default["id"]
+            st.session_state["_autocreated_geo"] = geo_id
+            st.rerun()
+
     with st.expander(t("new_case"), expanded=not sims):
         with st.form("new_sim_form"):
             sim_name = st.text_input(t("case_name"))
@@ -85,6 +93,100 @@ with left:
                     st.rerun()
                 else:
                     st.error(t("case_create_fail"))
+
+    with st.expander(t("yaw_sweep"), expanded=False):
+        with st.form("sweep_form"):
+            sw_name = st.text_input(t("sweep_base_name"), value="case")
+            sw_vel  = st.number_input(t("wind_speed"), value=10.0, min_value=0.1, step=1.0)
+
+            # Header row
+            _, hc1, hc2, hc3 = st.columns([2, 1, 1, 1])
+            with hc1: st.caption(t("sweep_start"))
+            with hc2: st.caption(t("sweep_end"))
+            with hc3: st.caption(t("sweep_step"))
+
+            # Yaw row
+            yc0, yc1, yc2, yc3 = st.columns([2, 1, 1, 1])
+            with yc0: st.markdown(t("sweep_axis_yaw"))
+            with yc1: sw_yaw_s = st.number_input("ys", value=0,  step=5,  label_visibility="collapsed")
+            with yc2: sw_yaw_e = st.number_input("ye", value=0,  step=5,  label_visibility="collapsed")
+            with yc3: sw_yaw_t = st.number_input("yt", value=10, step=5, min_value=1, label_visibility="collapsed")
+
+            # Pitch row
+            pc0, pc1, pc2, pc3 = st.columns([2, 1, 1, 1])
+            with pc0: st.markdown(t("sweep_axis_pitch"))
+            with pc1: sw_pit_s = st.number_input("ps", value=0, step=5,  label_visibility="collapsed")
+            with pc2: sw_pit_e = st.number_input("pe", value=0, step=5,  label_visibility="collapsed")
+            with pc3: sw_pit_t = st.number_input("pt", value=5, step=5, min_value=1, label_visibility="collapsed")
+
+            # Roll row
+            rc0, rc1, rc2, rc3 = st.columns([2, 1, 1, 1])
+            with rc0: st.markdown(t("sweep_axis_roll"))
+            with rc1: sw_rol_s = st.number_input("rs", value=0, step=5,  label_visibility="collapsed")
+            with rc2: sw_rol_e = st.number_input("re", value=0, step=5,  label_visibility="collapsed")
+            with rc3: sw_rol_t = st.number_input("rt", value=5, step=5, min_value=1, label_visibility="collapsed")
+
+            def _sweep_range(start, end, step):
+                start, end, step = int(start), int(end), max(1, int(step))
+                if end >= start:
+                    return list(range(start, end + 1, step))
+                else:
+                    return list(range(start, end - 1, -step))
+
+            yaws    = _sweep_range(sw_yaw_s, sw_yaw_e, sw_yaw_t)
+            pitches = _sweep_range(sw_pit_s, sw_pit_e, sw_pit_t)
+            rolls   = _sweep_range(sw_rol_s, sw_rol_e, sw_rol_t)
+            total = len(yaws) * len(pitches) * len(rolls)
+            st.caption(t("sweep_total", total))
+
+            if st.form_submit_button(t("sweep_create"), use_container_width=True):
+                from itertools import product as _product
+                pure_yaw = (pitches == [0] and rolls == [0])
+                created, failed = 0, 0
+                last_id = None
+                for yaw_val, pitch_val, roll_val in _product(yaws, pitches, rolls):
+                    if pure_yaw:
+                        name = f"{sw_name}_{yaw_val:+.0f}deg" if yaw_val != 0 else f"{sw_name}_0deg"
+                    else:
+                        name = f"{sw_name}_y{yaw_val:+.0f}_p{pitch_val:+.0f}_r{roll_val:+.0f}"
+                    sim = api.create_simulation(geo_id, name, "STEADY")
+                    if sim:
+                        params = {**sim.get("parameters", {}), "velocity_mps": sw_vel}
+                        api.update_simulation(sim["id"],
+                                              yaw_deg=float(yaw_val),
+                                              pitch_deg=float(pitch_val),
+                                              roll_deg=float(roll_val),
+                                              parameters=params)
+                        last_id = sim["id"]
+                        created += 1
+                    else:
+                        failed += 1
+                if last_id:
+                    st.session_state["sim_id"] = last_id
+                st.success(t("sweep_done", created))
+                if failed:
+                    st.error(t("sweep_fail", failed))
+                st.rerun()
+
+    # Batch submit button for pending cases
+    pending = [s for s in sims if s["status"] == "PENDING"]
+    if pending:
+        if st.button(
+            f"▶ {t('submit_all_pending', len(pending))}",
+            use_container_width=True,
+            type="primary",
+        ):
+            ok, fail = 0, 0
+            for ps in pending:
+                if api.submit_job(ps["id"]):
+                    ok += 1
+                else:
+                    fail += 1
+            if ok:
+                st.success(t("submit_all_done", ok))
+            if fail:
+                st.error(t("submit_all_fail", fail))
+            st.rerun()
 
     sim_id = st.session_state.get("sim_id")
     for s in sims:

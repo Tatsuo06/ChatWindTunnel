@@ -20,6 +20,12 @@ When the user asks to create multiple cases (e.g., sweep yaw angles), call creat
 When results are available, explain Cd (drag coefficient), Cl (lift coefficient), and convergence behavior clearly.
 Always confirm parameter changes with the user before finalizing.
 Respond in the same language as the user.
+
+TOOL-USE RULES (mandatory):
+- delete cases → MUST call delete_simulations tool. Example: "delete case_10" → delete_simulations(names=["case_10"])
+- submit jobs  → MUST call submit_jobs tool. Example: "submit all" → submit_jobs(submit_all_pending=true)
+- create cases → MUST call create_simulation (once per case)
+- NEVER claim an action succeeded without first calling the corresponding tool.
 """
 
 TOOLS = [
@@ -180,6 +186,28 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_simulations",
+            "description": "Delete simulation cases by name. Only PENDING or FAILED cases can be deleted (not RUNNING or MESHING). Use names list to specify which cases to delete.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of case names to delete",
+                    },
+                    "delete_all_pending": {
+                        "type": "boolean",
+                        "description": "If true, delete all PENDING cases for this geometry",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -193,11 +221,10 @@ def _turbulence_from_intensity(velocity: float, intensity: float, lref: float = 
 def _execute_tool(
     tool_name: str, tool_args: dict, current_params: dict, case_dir: Path,
     all_cases: list[dict] | None = None,
-) -> tuple[dict, str, dict, list[dict], dict | None]:
+) -> tuple[dict, str, dict, list[dict], dict | None, dict | None]:
     """Apply tool call to current_params dict.
-    Returns (updated_params, result_message, angle_updates, sim_creations, job_submission).
-    sim_creations: list of dicts for new simulations to create in the DB.
-    job_submission: dict describing which simulations to submit, or None.
+    Returns (updated_params, result_message, angle_updates, sim_creations, job_submission, sim_deletions).
+    sim_deletions: dict with 'names' and/or 'delete_all_pending', or None.
     """
     params = current_params.copy()
 
@@ -219,7 +246,7 @@ def _execute_tool(
         yaw = tool_args.get("yaw_deg")
         pitch = tool_args.get("pitch_deg")
         roll = tool_args.get("roll_deg")
-        return params, result, {"yaw_deg": yaw, "pitch_deg": pitch, "roll_deg": roll}, [], None
+        return params, result, {"yaw_deg": yaw, "pitch_deg": pitch, "roll_deg": roll}, [], None, None
 
     if tool_name == "set_solver_settings":
         params.update({k: v for k, v in tool_args.items() if k in ("end_time", "delta_t", "n_processors")})
@@ -227,15 +254,15 @@ def _execute_tool(
             params["solver_type"] = tool_args["solver_type"]
         if "turbulence_model" in tool_args:
             params["turbulence_model"] = tool_args["turbulence_model"]
-        return params, f"Solver settings updated: {tool_args}", {}, [], None
+        return params, f"Solver settings updated: {tool_args}", {}, [], None, None
 
     if tool_name == "set_mesh_settings":
         params.update(tool_args)
-        return params, f"Mesh settings updated: {tool_args}", {}, [], None
+        return params, f"Mesh settings updated: {tool_args}", {}, [], None, None
 
     if tool_name == "set_force_reference":
         params.update(tool_args)
-        return params, f"Force reference updated: {tool_args}", {}, [], None
+        return params, f"Force reference updated: {tool_args}", {}, [], None, None
 
     if tool_name == "get_result_summary":
         summary_lines = []
@@ -250,12 +277,12 @@ def _execute_tool(
             last = fc_df.iloc[-1]
             summary_lines.append(f"Final Cd={last.get('Cd', 'N/A'):.4f}, Cl={last.get('Cl', 'N/A'):.4f}")
         result = "\n".join(summary_lines) if summary_lines else "No results available yet."
-        return params, result, {}, [], None
+        return params, result, {}, [], None, None
 
     if tool_name == "get_mesh_info":
         info = parse_mesh_info(case_dir) if case_dir.exists() else {}
         if not info:
-            return params, "Mesh info not available (log.checkMesh not found).", {}, [], None
+            return params, "Mesh info not available (log.checkMesh not found).", {}, [], None, None
         lines = []
         if "cells" in info:
             lines.append(f"Total cells: {info['cells']:,}")
@@ -267,7 +294,7 @@ def _execute_tool(
             lines.append(f"Non-orthogonality: max={info['max_non_ortho']:.1f}°, avg={info['avg_non_ortho']:.1f}°")
         if "max_skewness" in info:
             lines.append(f"Max skewness: {info['max_skewness']:.2f}")
-        return params, "\n".join(lines), {}, [], None
+        return params, "\n".join(lines), {}, [], None, None
 
     if tool_name == "compare_cases":
         cases = all_cases or []
@@ -275,9 +302,9 @@ def _execute_tool(
         if status_filter != "all":
             cases = [c for c in cases if c.get("status") == status_filter]
         if not cases:
-            return params, "No cases found.", {}, [], None
+            return params, "No cases found.", {}, [], None, None
         import json as _json
-        return params, _json.dumps(cases, ensure_ascii=False), {}, [], None
+        return params, _json.dumps(cases, ensure_ascii=False), {}, [], None, None
 
     if tool_name == "create_simulation":
         sc = {
@@ -288,7 +315,7 @@ def _execute_tool(
             "velocity_mps": float(tool_args.get("velocity_mps", 20)),
             "solver_type": tool_args.get("solver_type", "STEADY"),
         }
-        return params, f"Queued creation: {sc['name']} (yaw={sc['yaw_deg']}°)", {}, [sc], None
+        return params, f"Queued creation: {sc['name']} (yaw={sc['yaw_deg']}°)", {}, [sc], None, None
 
     if tool_name == "submit_jobs":
         js: dict = {}
@@ -296,9 +323,17 @@ def _execute_tool(
             js["submit_all_pending"] = True
         if tool_args.get("names"):
             js["names"] = tool_args["names"]
-        return params, f"Queued job submission: {js}", {}, [], js
+        return params, f"Queued job submission: {js}", {}, [], js, None
 
-    return current_params, f"Unknown tool: {tool_name}", {}, [], None
+    if tool_name == "delete_simulations":
+        sd: dict = {}
+        if tool_args.get("names"):
+            sd["names"] = tool_args["names"]
+        if tool_args.get("delete_all_pending"):
+            sd["delete_all_pending"] = True
+        return params, f"Queued deletion: {sd}", {}, [], None, sd
+
+    return current_params, f"Unknown tool: {tool_name}", {}, [], None, None
 
 
 async def chat(
@@ -306,9 +341,9 @@ async def chat(
     current_params: dict,
     case_dir: Path = Path("/dev/null"),
     all_cases: list[dict] | None = None,
-) -> tuple[str, dict, dict, list[dict], dict]:
+) -> tuple[str, dict, dict, list[dict], dict, dict]:
     """Run one chat turn.
-    Returns (assistant_reply, updated_params, angle_updates, sim_creations, job_submission).
+    Returns (assistant_reply, updated_params, angle_updates, sim_creations, job_submission, sim_deletions).
     """
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
@@ -326,6 +361,7 @@ async def chat(
     angle_updates: dict = {}
     sim_creations: list[dict] = []
     job_submission: dict = {}
+    sim_deletions: dict = {}
 
     # Process tool calls if any
     if message.tool_calls:
@@ -333,13 +369,15 @@ async def chat(
         tool_results = []
         for tc in message.tool_calls:
             tool_args = json.loads(tc.function.arguments)
-            params, result_msg, angles, creations, js = _execute_tool(
+            params, result_msg, angles, creations, js, sd = _execute_tool(
                 tc.function.name, tool_args, params, case_dir, all_cases=all_cases
             )
             angle_updates.update({k: v for k, v in angles.items() if v is not None})
             sim_creations.extend(creations)
             if js:
                 job_submission.update(js)
+            if sd:
+                sim_deletions.update(sd)
             tool_results.append({"tool_call_id": tc.id, "role": "tool", "content": result_msg})
 
         # Second pass: get final assistant reply after tool execution
@@ -351,6 +389,6 @@ async def chat(
             temperature=0.2,
         )
         reply = follow_up.choices[0].message.content or ""
-        return reply, params, angle_updates, sim_creations, job_submission
+        return reply, params, angle_updates, sim_creations, job_submission, sim_deletions
 
-    return message.content or "", current_params, angle_updates, sim_creations, job_submission
+    return message.content or "", current_params, angle_updates, sim_creations, job_submission, sim_deletions

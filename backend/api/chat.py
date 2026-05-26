@@ -88,7 +88,7 @@ async def send_message(sim_id: int, body: ChatRequest, current_user: CurrentUser
 
     # Call LLM
     case_dir = settings.CASES_DIR / str(sim_id)
-    reply, updated_params, angle_updates, sim_creations, job_submission = await chat(
+    reply, updated_params, angle_updates, sim_creations, job_submission, sim_deletions = await chat(
         history, sim.parameters, case_dir=case_dir, all_cases=all_cases
     )
 
@@ -115,6 +115,23 @@ async def send_message(sim_id: int, body: ChatRequest, current_user: CurrentUser
             parameters=new_params,
         )
         db.add(new_sim)
+
+    # Delete simulations requested by the agent (only PENDING/FAILED, not RUNNING/MESHING)
+    if sim_deletions:
+        del_result = await db.execute(
+            select(Simulation)
+            .where(Simulation.geometry_id == sim.geometry_id)
+            .where(Simulation.status.in_([SimulationStatus.pending, SimulationStatus.failed]))
+        )
+        candidates = del_result.scalars().all()
+        if sim_deletions.get("delete_all_pending"):
+            to_delete = candidates
+        else:
+            names = set(sim_deletions.get("names", []))
+            to_delete = [s for s in candidates if s.name in names]
+        for s in to_delete:
+            if s.id != sim_id:  # don't delete the current simulation
+                await db.delete(s)
 
     db.add(ChatMessage(simulation_id=sim_id, role="assistant", content=reply))
     await db.commit()
