@@ -68,7 +68,13 @@ def _generate_tunnel_illustration(out_path: Path) -> None:
     draw.rectangle([fx0, fy0, fx1, fy1], fill=(28, 32, 42))
     draw.rectangle([fx0, fy0 + 6, fx1, fy0 + 12], fill=(55, 68, 90))
 
-    def _cubic(p0, p1, p2, p3, n=160):
+    import math as _math
+
+    SC = (31, 97, 183, 155)
+    bow_x = 148
+    stern_x = 493
+
+    def _cubic(p0, p1, p2, p3, n=200):
         pts = []
         for i in range(n + 1):
             t_ = i / n
@@ -78,12 +84,31 @@ def _generate_tunnel_illustration(out_path: Path) -> None:
             pts.append((round(x), round(y)))
         return pts
 
-    for i, y_s in enumerate([26, 34, 42, 50, 58, 68, 78]):
-        deflect = int(i / 6 * 22)
-        yc = y_s - deflect
-        pts = _cubic((0, y_s), (205, yc), (515, yc), (W, y_s))
+    def _draw_pts(pts, color=SC):
         for j in range(len(pts) - 1):
-            draw.line([pts[j], pts[j + 1]], fill=(31, 97, 183, 150), width=2)
+            draw.line([pts[j], pts[j + 1]], fill=color, width=2)
+
+    # Streamlines: flat approach until near bow, deflect over ship, recover after stern
+    # (y_inlet, y_peak_over_ship)
+    for y_s, y_pk in [(26, 23), (33, 29), (40, 33), (48, 38), (57, 44), (67, 50), (78, 57)]:
+        _draw_pts(_cubic((0, y_s), (bow_x - 40, y_s), (bow_x + 10, y_s - 2), (280, y_pk)))
+        _draw_pts(_cubic((280, y_pk), (stern_x - 30, y_pk), (stern_x + 30, y_s), (W, y_s)))
+
+    # Vortex spirals in the wake behind the superstructure
+    def _vortex(cx, cy, r_start, n_turns, flip_y=False):
+        n = int(n_turns * 80)
+        pts = []
+        for i in range(n):
+            t = i / max(n - 1, 1)
+            r = r_start * (1 - 0.82 * t)
+            theta = _math.pi + 2 * _math.pi * n_turns * t
+            sy = -1 if flip_y else 1
+            pts.append((int(cx + r * _math.cos(theta)), int(cy + sy * r * _math.sin(theta))))
+        for j in range(len(pts) - 1):
+            draw.line([pts[j], pts[j + 1]], fill=SC, width=2)
+
+    _vortex(538, 90, 30, 1.8, flip_y=True)   # upper vortex, clockwise
+    _vortex(578, 122, 24, 1.6, flip_y=False)  # lower vortex, counter-clockwise
 
     for ya in [26, 42, 58, 72]:
         draw.line([(4, ya), (27, ya)], fill=(31, 97, 183), width=2)

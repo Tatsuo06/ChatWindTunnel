@@ -78,6 +78,30 @@ def _rsync_down(remote_dir: str, local_dir: Path) -> None:
          remote, f"{local_dir}/"],
         check=True,
     )
+    _cleanup_intermediate_timesteps(local_dir)
+
+
+_PP_TARGETS = (
+    "postProcessing/cuttingPlane",
+    "postProcessing/sets/streamLines",
+    "postProcessing/sets/streamLinesBack",
+    "postProcessing/sets/wallBoundedStreamLines",
+)
+
+
+def _cleanup_intermediate_timesteps(case_dir: Path) -> None:
+    """Keep only the latest numeric timestep in postProcessing visualisation dirs."""
+    import shutil
+    for rel in _PP_TARGETS:
+        target = case_dir / rel
+        if not target.is_dir():
+            continue
+        ts_dirs = sorted(
+            [d for d in target.iterdir() if d.is_dir() and d.name.replace(".", "").isdigit()],
+            key=lambda d: float(d.name),
+        )
+        for d in ts_dirs[:-1]:
+            shutil.rmtree(d)
 
 
 class ClusterRunner(JobRunner):

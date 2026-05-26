@@ -2,7 +2,7 @@
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -121,7 +121,10 @@ async def geometry_bbox(geo_id: int, current_user: CurrentUser, db: DB):
 
 
 @router.post("/geometries/{geo_id}/upload-cad", response_model=GeometryResponse)
-async def upload_cad(geo_id: int, file: UploadFile, current_user: CurrentUser, db: DB):
+async def upload_cad(
+    geo_id: int, file: UploadFile, current_user: CurrentUser, db: DB,
+    scale: float = Query(1.0, description="Scale factor applied to all vertices (e.g. 0.001 for mm→m)"),
+):
     result = await db.execute(
         select(Geometry).where(Geometry.id == geo_id).options(selectinload(Geometry.project))
     )
@@ -137,12 +140,36 @@ async def upload_cad(geo_id: int, file: UploadFile, current_user: CurrentUser, d
     with open(original_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    stl_path = convert_to_stl(original_path, upload_dir)
+    stl_path = convert_to_stl(original_path, upload_dir, scale=scale)
 
     geo.cad_file_path = str(original_path)
     geo.stl_file_path = str(stl_path)
     if not geo.name or geo.name == "geometry":
         geo.name = original_path.stem
+    await db.commit()
+    await db.refresh(geo)
+    return geo
+
+
+@router.post("/geometries/{geo_id}/scale", response_model=GeometryResponse)
+async def scale_geometry(
+    geo_id: int, current_user: CurrentUser, db: DB,
+    factor: float = Query(..., description="Scale factor to apply (e.g. 2.0 to double size)"),
+):
+    """Re-convert original CAD file with a new scale factor, replacing the current STL."""
+    result = await db.execute(
+        select(Geometry).where(Geometry.id == geo_id).options(selectinload(Geometry.project))
+    )
+    geo = result.scalar_one_or_none()
+    if not geo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geometry not found")
+    _assert_project_access(geo.project, current_user)
+    if not geo.cad_file_path:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No original CAD file available")
+
+    upload_dir = Path(geo.cad_file_path).parent
+    stl_path = convert_to_stl(Path(geo.cad_file_path), upload_dir, scale=factor)
+    geo.stl_file_path = str(stl_path)
     await db.commit()
     await db.refresh(geo)
     return geo

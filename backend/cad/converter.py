@@ -8,8 +8,11 @@ from pathlib import Path
 import numpy as np
 
 
-def convert_to_stl(input_path: Path, output_dir: Path) -> Path:
-    """Convert CAD file to STL. Returns path to the STL file."""
+def convert_to_stl(input_path: Path, output_dir: Path, scale: float = 1.0) -> Path:
+    """Convert CAD file to STL. Returns path to the STL file.
+
+    scale: multiply all vertex coordinates by this factor (e.g. 0.001 for mm→m).
+    """
     suffix = input_path.suffix.lower()
     stl_path = output_dir / (input_path.stem + ".stl")
 
@@ -17,17 +20,25 @@ def convert_to_stl(input_path: Path, output_dir: Path) -> Path:
         if input_path != stl_path:
             import shutil
             shutil.copy2(input_path, stl_path)
-        return stl_path
-
-    if suffix == ".obj":
+    elif suffix == ".obj":
         _convert_obj_to_stl(input_path, stl_path)
-        return stl_path
-
-    if suffix in (".step", ".stp", ".iges", ".igs"):
+    elif suffix in (".step", ".stp", ".iges", ".igs"):
         _convert_via_cadquery(input_path, stl_path)
-        return stl_path
+    else:
+        raise ValueError(f"Unsupported CAD format: {suffix}")
 
-    raise ValueError(f"Unsupported CAD format: {suffix}")
+    if scale != 1.0:
+        _scale_stl(stl_path, scale)
+    return stl_path
+
+
+def _scale_stl(stl_path: Path, scale: float) -> None:
+    """Scale all vertices of an STL file in-place."""
+    from stl import mesh as stl_mesh
+    geometry = stl_mesh.Mesh.from_file(str(stl_path))
+    geometry.vectors *= scale
+    geometry.update_normals()
+    geometry.save(str(stl_path))
 
 
 def _convert_obj_to_stl(input_path: Path, stl_path: Path) -> None:

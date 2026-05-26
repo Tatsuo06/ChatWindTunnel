@@ -113,8 +113,13 @@ def delete_geometry(geo_id: int) -> bool:
     return _delete(f"/geometries/{geo_id}").status_code == 204
 
 
-def upload_cad(geo_id: int, file_bytes: bytes, filename: str) -> dict | None:
-    r = _post(f"/geometries/{geo_id}/upload-cad", files={"file": (filename, file_bytes)})
+def upload_cad(geo_id: int, file_bytes: bytes, filename: str, scale: float = 1.0) -> dict | None:
+    r = _post(f"/geometries/{geo_id}/upload-cad", files={"file": (filename, file_bytes)}, params={"scale": scale})
+    return r.json() if r.ok else None
+
+
+def scale_geometry(geo_id: int, factor: float) -> dict | None:
+    r = _post(f"/geometries/{geo_id}/scale", params={"factor": factor})
     return r.json() if r.ok else None
 
 

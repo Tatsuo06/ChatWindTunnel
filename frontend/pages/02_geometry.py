@@ -24,12 +24,16 @@ with st.expander(t("add_geometry"), expanded=False):
             t("file_drop"),
             type=["stl", "step", "stp", "iges", "igs", "obj"],
         )
+        upload_scale = st.number_input(
+            t("scale_factor"), value=1.0, min_value=1e-6, format="%.6f",
+            help="1.0 = no change, 0.001 = mm→m",
+        )
         if st.form_submit_button(t("upload"), use_container_width=True):
             if uploaded:
                 with st.spinner(t("converting")):
                     name = geo_name or uploaded.name.rsplit(".", 1)[0]
                     geo = api.create_geometry(project_id, name)
-                    result = api.upload_cad(geo["id"], uploaded.read(), uploaded.name) if geo else None
+                    result = api.upload_cad(geo["id"], uploaded.read(), uploaded.name, scale=upload_scale) if geo else None
                 if result:
                     st.session_state["geo_id"] = result["id"]
                     st.session_state["geo_name"] = result["name"]
@@ -96,16 +100,20 @@ else:
                     t("file_drop"), type=["stl", "step", "stp", "iges", "igs", "obj"],
                     key=f"reupload_{geo['id']}",
                 )
+                ru_scale = st.number_input(
+                    t("scale_factor"), value=1.0, min_value=1e-6, format="%.6f",
+                    help="1.0 = no change, 0.001 = mm→m", key=f"ru_scale_{geo['id']}",
+                )
                 if up:
                     with st.spinner(t("converting")):
-                        result = api.upload_cad(geo["id"], up.read(), up.name)
+                        result = api.upload_cad(geo["id"], up.read(), up.name, scale=ru_scale)
                     if result:
                         st.success(t("geo_uploaded", result["name"]))
                         st.rerun()
                     else:
                         st.error(t("upload_fail"))
 
-        if is_selected and geo.get("stl_file_path"):
+        if geo.get("stl_file_path"):
             bbox = api.get_geometry_bbox(geo["id"])
             if bbox:
                 mn, mx = bbox["min"], bbox["max"]
