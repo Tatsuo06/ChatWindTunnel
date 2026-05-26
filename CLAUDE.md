@@ -178,13 +178,14 @@ Implemented in `case_builder._refbox_from_rotated_stl()`. Called in `build_case(
 
 ## Turbulence Models
 
-The steady-state solver (simpleFoam) supports three RANS models selectable via `turbulence_model` in simulation parameters or via chat (`set_solver_settings`). The default is `kOmegaSST`.
+The steady-state solver (simpleFoam) supports three RANS models and a laminar option, selectable via `turbulence_model` in simulation parameters or via chat (`set_solver_settings`). The default is `kOmegaSST`.
 
 | Model | Parameter value | Fields | Stability (bluff body) |
 |---|---|---|---|
 | k-ω SST | `kOmegaSST` | k, omega, nut | ✅ Excellent — default |
 | Spalart-Allmaras | `SpalartAllmaras` | nuTilda, nut | ✅ Good — one-equation, fast |
 | Realizable k-ε | `realizableKE` | k, epsilon, nut | ✅ Good — stable k-ε variant |
+| Laminar | `laminar` | (none) | ✅ Valid for Re ≲ 10³; use to compare with turbulent at same Re |
 
 **What `case_builder.py` does at build time** (`_apply_spalart_allmaras` / `_apply_kepsilon`):
 

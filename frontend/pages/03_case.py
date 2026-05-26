@@ -300,6 +300,12 @@ with right:
             if bbox:
                 cx, cy, cz = bbox["center"]
                 st.caption(f"{t('rotation_center')} ({cx:.3f}, {cy:.3f}, {cz:.3f}) m")
+                x0_b, _, _ = bbox["min"]
+                x1_b, _, _ = bbox["max"]
+                lref_b = x1_b - x0_b
+                nu_b = float(sim.get("parameters", {}).get("nu", 1.5e-5))
+                re_b = velocity * lref_b / nu_b
+                st.caption(f"Re = {re_b:,.0f}  (U = {velocity} m/s, L = {lref_b:.3f} m, ν = {nu_b:.2g} m²/s)")
 
         if st.button(t("save_settings")):
             params = {**sim.get("parameters", {}), "velocity_mps": velocity}

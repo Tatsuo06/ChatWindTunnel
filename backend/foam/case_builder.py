@@ -228,6 +228,8 @@ def build_case(
         _apply_spalart_allmaras(case_dir)
     elif turb_model == "realizableKE":
         _apply_kepsilon(case_dir, "realizableKE")
+    elif turb_model == "laminar":
+        _apply_laminar(case_dir)
 
     # Empty .foam file required by pyvista.OpenFOAMReader
     (case_dir / "case.foam").touch()
@@ -293,7 +295,11 @@ def _write_initial_conditions(case_dir: Path, params: dict) -> None:
     content = ic_path.read_text()
     content = _set_value(content, "flowVelocity", flow_velocity)
 
-    if turbulence_model == "SpalartAllmaras":
+    if turbulence_model == "laminar":
+        content = _set_value(content, "flowVelocity", flow_velocity)
+        ic_path.write_text(content)
+        return
+    elif turbulence_model == "SpalartAllmaras":
         nu = params.get("nu", 1.5e-5)
         nu_tilda_inlet = round(3.0 * nu, 8)
         content = re.sub(r"turbulentKE\s+[^;]+;", f"nuTildaInlet         {nu_tilda_inlet:.6g};", content)
@@ -767,6 +773,46 @@ def _apply_kepsilon(case_dir: Path, model_name: str = "realizableKE") -> None:
     fvsol_path.write_text(fvsol)
 
 
+def _apply_laminar(case_dir: Path) -> None:
+    """Convert a kOmegaSST case directory to pure laminar (no turbulence model).
+
+    Changes:
+    - constant/turbulenceProperties: simulationType RAS → laminar (drop RAS block)
+    - 0.orig/k, 0.orig/omega, 0.orig/nut: removed
+    - system/fvSchemes: remove div(phi,k) and div(phi,omega)
+    - system/fvSolution: remove k/omega solvers and relaxation
+    """
+    # turbulenceProperties: replace entire RAS block with laminar
+    tp = case_dir / "constant" / "turbulenceProperties"
+    content = tp.read_text()
+    content = re.sub(r"simulationType\s+\S+;", "simulationType  laminar;", content)
+    content = re.sub(r"\nRAS\s*\{[^}]+\}", "", content, flags=re.DOTALL)
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    tp.write_text(content)
+
+    # Remove turbulence fields
+    for fname in ("k", "omega", "nut"):
+        f = case_dir / "0.orig" / fname
+        if f.exists():
+            f.unlink()
+
+    # fvSchemes: remove div(phi,k) and div(phi,omega)
+    fvs_path = case_dir / "system" / "fvSchemes"
+    fvs = fvs_path.read_text()
+    fvs = re.sub(r"[ \t]*div\(phi,k\)\s+[^\n]+\n", "", fvs)
+    fvs = re.sub(r"[ \t]*div\(phi,omega\)\s+[^\n]+\n", "", fvs)
+    fvs_path.write_text(fvs)
+
+    # fvSolution: remove k/omega solvers and relaxation
+    fvsol_path = case_dir / "system" / "fvSolution"
+    fvsol = fvsol_path.read_text()
+    fvsol = re.sub(r"\n    k\s*\{[^}]+\}", "", fvsol)
+    fvsol = re.sub(r"\n    omega\s*\{[^}]+\}", "", fvsol)
+    fvsol = re.sub(r"[ \t]*k\s+[0-9.]+;\n", "", fvsol)
+    fvsol = re.sub(r"[ \t]*omega\s+[0-9.]+;\n", "", fvsol)
+    fvsol_path.write_text(fvsol)
+
+
 def _write_block_mesh_dict(case_dir: Path, params: dict) -> None:
     scale  = params.get("domain_scale",  1)
     xmin   = params.get("domain_xmin",  -5)
@@ -896,7 +942,14 @@ def _write_streamlines(case_dir: Path, params: dict) -> None:
     radius   = params.get("streamline_radius", 0.5)
     n_points = int(params.get("streamline_n_points", 50))
     _tm = params.get("turbulence_model", "kOmegaSST")
-    turb_field = "nuTilda" if _tm == "SpalartAllmaras" else ("epsilon" if _tm == "realizableKE" else "k")
+    if _tm == "laminar":
+        turb_field = None
+    elif _tm == "SpalartAllmaras":
+        turb_field = "nuTilda"
+    elif _tm == "realizableKE":
+        turb_field = "epsilon"
+    else:
+        turb_field = "k"
 
     pts = _sphere_seed_points(center, radius, n_points)
     pts_str = "\n        ".join(f"({p[0]} {p[1]} {p[2]})" for p in pts)
@@ -910,6 +963,8 @@ def _write_streamlines(case_dir: Path, params: dict) -> None:
         {pts_str}
         );
     }}"""
+
+    fields_str = f"p U {turb_field}" if turb_field else "p U"
 
     content = f"""\
 /*--------------------------------*- C++ -*----------------------------------*\\
@@ -929,7 +984,7 @@ streamLines
     writeControl    writeTime;
     setFormat       vtk;
     trackForward    true;
-    fields          (p U {turb_field});
+    fields          ({fields_str});
     lifeTime        10000;
     nSubCycle       5;
     cloud           particleTracks;
@@ -943,7 +998,7 @@ streamLinesBack
     writeControl    writeTime;
     setFormat       vtk;
     trackForward    false;
-    fields          (p U {turb_field});
+    fields          ({fields_str});
     lifeTime        10000;
     nSubCycle       5;
     cloud           particleTracksBack;

@@ -59,8 +59,8 @@ TOOLS = [
                     "solver_type": {"type": "string", "enum": ["STEADY", "UNSTEADY"]},
                     "turbulence_model": {
                         "type": "string",
-                        "enum": ["kOmegaSST", "SpalartAllmaras", "realizableKE"],
-                        "description": "RANS turbulence model (default kOmegaSST). kOmegaSST recommended for most cases; realizableKE for k-epsilon style.",
+                        "enum": ["kOmegaSST", "SpalartAllmaras", "realizableKE", "laminar"],
+                        "description": "Turbulence model (default kOmegaSST). Use 'laminar' for low-Re laminar flow (no turbulence equations).",
                     },
                     "end_time": {"type": "number", "description": "Number of iterations (steady) or physical end time in seconds (unsteady)"},
                     "delta_t": {"type": "number", "description": "Time step size in seconds (unsteady only)"},
