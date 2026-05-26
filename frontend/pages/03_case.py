@@ -422,6 +422,22 @@ with right:
                         )
 
                         fig = go.Figure()
+
+                        # STL 物体を半透明メッシュで追加（67万→3万三角形に間引き）
+                        if paths.get("stl_path"):
+                            stl = pv.read(paths["stl_path"])
+                            stl = stl.triangulate().decimate(0.95)
+                            faces = stl.faces.reshape(-1, 4)[:, 1:]
+                            fig.add_trace(go.Mesh3d(
+                                x=stl.points[:, 0],
+                                y=stl.points[:, 1],
+                                z=stl.points[:, 2],
+                                i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+                                color="lightgray", opacity=0.4,
+                                showlegend=False, hoverinfo="skip",
+                                lighting=dict(ambient=0.8, diffuse=0.5),
+                            ))
+
                         # VTPファイルごとに1トレース（全トラックをNoneで結合）
                         for mesh, u_mag in zip(meshes, u_mags):
                             pts = mesh.points
