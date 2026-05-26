@@ -223,3 +223,8 @@ def get_mesh_stats(sim_id: int) -> dict | None:
 def get_streamlines_plot(sim_id: int) -> bytes | None:
     r = _get(f"/simulations/{sim_id}/results/streamlines")
     return r.content if r.ok else None
+
+
+def get_streamlines_paths(sim_id: int) -> dict | None:
+    r = _get(f"/simulations/{sim_id}/results/streamlines-paths")
+    return r.json() if r.ok else None

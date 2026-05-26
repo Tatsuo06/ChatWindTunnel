@@ -274,3 +274,49 @@ async def streamlines(sim_id: int, current_user: CurrentUser, db: DB):
     stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
     return _png(backend.plot_streamlines(vtk_paths, geo_bounds=geo_bounds,
                                          stl_path=stl_path if stl_path.exists() else None))
+
+
+@router.get("/streamlines-paths")
+async def streamlines_paths(sim_id: int, current_user: CurrentUser, db: DB):
+    """Return local file paths of streamline VTKs and STL for stpyvista interactive rendering."""
+    sim = await _get_done_sim(sim_id, db)
+    if not sim.case_dir:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+
+    case_dir = Path(sim.case_dir)
+
+    def _latest_vtk(pattern: str) -> Path | None:
+        files = sorted(
+            case_dir.glob(pattern),
+            key=lambda p: float(p.parent.name) if p.parent.name.replace(".", "").isdigit() else 0,
+        )
+        return files[-1] if files else None
+
+    vtk_paths: list[str] = []
+    for pattern in (
+        "postProcessing/sets/streamLines/**/*.vtp",
+        "postProcessing/streamLines/**/*.vtp",
+        "postProcessing/streamLines/**/*.vtk",
+    ):
+        f = _latest_vtk(pattern)
+        if f:
+            vtk_paths.append(str(f))
+            break
+    for pattern in (
+        "postProcessing/sets/streamLinesBack/**/*.vtp",
+        "postProcessing/streamLinesBack/**/*.vtp",
+        "postProcessing/streamLinesBack/**/*.vtk",
+    ):
+        f = _latest_vtk(pattern)
+        if f:
+            vtk_paths.append(str(f))
+            break
+
+    if not vtk_paths:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No streamline data")
+
+    stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
+    return {
+        "vtk_paths": vtk_paths,
+        "stl_path": str(stl_path) if stl_path.exists() else None,
+    }

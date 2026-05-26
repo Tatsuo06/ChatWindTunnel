@@ -397,11 +397,44 @@ with right:
 
         with tab_stream:
             st.subheader(t("streamlines"))
-            img = api.get_streamlines_plot(sim_id)
-            if img:
-                st.image(img, use_container_width=True)
+            interactive = st.toggle("インタラクティブ 3D", value=False, key="stream_3d")
+            if interactive:
+                try:
+                    import pyvista as pv
+                    import numpy as np
+                    from stpyvista import stpyvista
+                    paths = api.get_streamlines_paths(sim_id)
+                    if paths:
+                        cmaps = ["plasma", "cool"]
+                        pl = pv.Plotter(window_size=[900, 500])
+                        meshes = []
+                        for vp in paths["vtk_paths"]:
+                            m = pv.read(vp)
+                            if m.n_points > 0 and "U" in m.point_data and m.point_data["U"].ndim == 2:
+                                m["U_mag"] = np.linalg.norm(m.point_data["U"], axis=1)
+                            meshes.append(m)
+                        u_max = max((float(m["U_mag"].max()) for m in meshes if "U_mag" in m.point_data), default=None)
+                        clim = [0, u_max]
+                        for idx, m in enumerate(meshes):
+                            if m.n_points == 0:
+                                continue
+                            scalars = "U_mag" if "U_mag" in m.point_data else (m.array_names[0] if m.array_names else None)
+                            pl.add_mesh(m, scalars=scalars, cmap="jet", line_width=2, clim=clim, show_scalar_bar=(idx == 0))
+                        if paths.get("stl_path"):
+                            stl = pv.read(paths["stl_path"])
+                            pl.add_mesh(stl, color="lightgray", opacity=0.4, smooth_shading=True)
+                        pl.view_xz()
+                        stpyvista(pl, key=f"stream3d_{sim_id}")
+                    else:
+                        st.info(t("stream_not_found"))
+                except Exception as e:
+                    st.error(f"3D表示エラー: {e}")
             else:
-                st.info(t("stream_not_found"))
+                img = api.get_streamlines_plot(sim_id)
+                if img:
+                    st.image(img, use_container_width=True)
+                else:
+                    st.info(t("stream_not_found"))
 
         _chat_section(
             sim_id,
