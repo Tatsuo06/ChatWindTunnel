@@ -406,51 +406,41 @@ with right:
 
                     paths = api.get_streamlines_paths(sim_id)
                     if paths:
-                        fig = go.Figure()
-                        all_u_mag = []
-                        track_data = []
-
-                        for vtp_path in paths["vtk_paths"]:
-                            mesh = pv.read(vtp_path)
-                            if mesh.n_points == 0:
+                        # 全VTPのU_mag最大値を先に計算
+                        meshes, u_mags = [], []
+                        for vp in paths["vtk_paths"]:
+                            m = pv.read(vp)
+                            if m.n_points == 0:
                                 continue
-                            if "U" in mesh.point_data and mesh.point_data["U"].ndim == 2:
-                                u_mag = np.linalg.norm(mesh.point_data["U"], axis=1)
-                            else:
-                                u_mag = None
-                            all_u_mag.append(u_mag)
-                            track_data.append((mesh, u_mag))
-
+                            u = np.linalg.norm(m.point_data["U"], axis=1) if (
+                                "U" in m.point_data and m.point_data["U"].ndim == 2
+                            ) else None
+                            meshes.append(m)
+                            u_mags.append(u)
                         u_max = max(
-                            (float(u.max()) for u in all_u_mag if u is not None),
-                            default=1.0,
+                            (float(u.max()) for u in u_mags if u is not None), default=1.0
                         )
 
-                        for mesh, u_mag in track_data:
+                        fig = go.Figure()
+                        # VTPファイルごとに1トレース（全トラックをNoneで結合）
+                        for mesh, u_mag in zip(meshes, u_mags):
                             pts = mesh.points
-                            # 各トラック（セル）を個別のラインとして描画
+                            xs, ys, zs, cs = [], [], [], []
                             for i in range(mesh.n_cells):
                                 cell = mesh.get_cell(i)
                                 idx = [cell.point_ids[j] for j in range(cell.n_points)]
-                                x = pts[idx, 0].tolist() + [None]
-                                y = pts[idx, 1].tolist() + [None]
-                                z = pts[idx, 2].tolist() + [None]
+                                xs.extend(pts[idx, 0].tolist()); xs.append(None)
+                                ys.extend(pts[idx, 1].tolist()); ys.append(None)
+                                zs.extend(pts[idx, 2].tolist()); zs.append(None)
                                 if u_mag is not None:
-                                    color_vals = (u_mag[idx] / u_max).tolist() + [float("nan")]
-                                else:
-                                    color_vals = None
-                                fig.add_trace(go.Scatter3d(
-                                    x=x, y=y, z=z,
-                                    mode="lines",
-                                    line=dict(
-                                        width=2,
-                                        color=color_vals if color_vals else "orange",
-                                        colorscale="Jet",
-                                        cmin=0, cmax=1,
-                                    ),
-                                    showlegend=False,
-                                    hoverinfo="skip",
-                                ))
+                                    cs.extend((u_mag[idx] / u_max).tolist()); cs.append(float("nan"))
+                            fig.add_trace(go.Scatter3d(
+                                x=xs, y=ys, z=zs, mode="lines",
+                                line=dict(width=2,
+                                          color=cs if cs else "orange",
+                                          colorscale="Jet", cmin=0, cmax=1),
+                                showlegend=False, hoverinfo="skip",
+                            ))
 
                         fig.update_layout(
                             scene=dict(
