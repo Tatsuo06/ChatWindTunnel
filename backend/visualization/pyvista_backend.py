@@ -207,8 +207,10 @@ class PyVistaBackend(VisualizationBackend):
             return _empty_plot(f"Patch '{patch}' not found")
 
         pl = pv.Plotter(off_screen=True, window_size=(1200, 800))
-        pl.add_mesh(mesh, show_edges=True, edge_color="black",
-                    color="lightgray", line_width=0.5)
+        pl.set_background("white")
+        pl.add_mesh(mesh, show_edges=True,
+                    color=[0.95, 0.95, 0.95], edge_color=[0.4, 0.4, 0.4],
+                    line_width=0.5, ambient=1.0, diffuse=0.0, specular=0.0)
 
         # Wind direction arrow: flow is always +X in OpenFOAM frame
         # Arrow placed upstream of the object
