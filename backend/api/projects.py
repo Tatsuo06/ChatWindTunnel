@@ -158,10 +158,11 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
                 "aref": p.get("aref"),
                 "lref": p.get("lref"),
                 "cofr": p.get("cofr"),
+                "nu": p.get("nu", 1.5e-5),
             })
         if points:
             points.sort(key=lambda x: x["yaw_deg"])
-            ref_params = {"rho_ref": 1.0, **{k: all_ref[0][k] for k in ("velocity_mps", "aref", "lref", "cofr")}} if all_ref else None
+            ref_params = {"rho_ref": 1.0, **{k: all_ref[0][k] for k in ("velocity_mps", "aref", "lref", "cofr", "nu")}} if all_ref else None
             # Detect inconsistencies across cases
             mismatch = []
             for key in ("velocity_mps", "aref", "lref", "cofr"):

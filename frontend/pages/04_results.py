@@ -284,11 +284,16 @@ for geo in data:
     if rp:
         cofr = rp.get("cofr")
         cofr_str = f"({cofr[0]:.3f}, {cofr[1]:.3f}, {cofr[2]:.3f}) m" if cofr else "—"
+        u = rp.get("velocity_mps") or 0.0
+        lref = rp.get("lref") or 0.0
+        nu = rp.get("nu") or 1.5e-5
+        re_str = f"{u * lref / nu:,.0f}" if u and lref else "—"
         st.caption(
             f"ρ_ref = {rp.get('rho_ref', 1.0)} kg/m³　　"
-            f"U_ref = {rp.get('velocity_mps')} m/s　　"
+            f"U_ref = {u} m/s　　"
             f"A_ref = {rp.get('aref')} m²　　"
-            f"L_ref = {rp.get('lref')} m　　"
+            f"L_ref = {lref} m　　"
+            f"Re = {re_str}　　"
             f"Moment center = {cofr_str}"
         )
     mismatch = geo.get("ref_params_mismatch")
