@@ -84,12 +84,19 @@ else:
                     st.switch_page("pages/03_case.py")
             with cols[2]:
                 if geo.get("cad_file_path"):
-                    result = api.download_cad(geo["id"])
-                    if result:
-                        file_bytes, filename = result
+                    dl_key = f"dl_data_{geo['id']}"
+                    if dl_key in st.session_state:
+                        file_bytes, filename = st.session_state[dl_key]
                         st.download_button("⬇", data=file_bytes, file_name=filename,
                                            key=f"dl_{geo['id']}", help=t("download_cad"),
                                            use_container_width=True)
+                    else:
+                        if st.button("⬇", key=f"dl_fetch_{geo['id']}", help=t("download_cad"),
+                                     use_container_width=True):
+                            result = api.download_cad(geo["id"])
+                            if result:
+                                st.session_state[dl_key] = result
+                                st.rerun()
             with cols[3]:
                 if st.button("✏️", key=f"edit_geo_{geo['id']}", help=t("rename")):
                     st.session_state[f"editing_geo_{geo['id']}"] = True
