@@ -67,6 +67,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "no_stl": "⚠️ No STL",
         "go_cases": "Cases",
         "delete_geo": "Delete geometry",
+        "download_cad": "Download CAD file",
         "select_geometry": "Please select a geometry first.",
         "go_geometry": "Go to Geometry",
 
@@ -270,6 +271,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "no_stl": "⚠️ STLなし",
         "go_cases": "ケースへ",
         "delete_geo": "この形状を削除",
+        "download_cad": "CADファイルをダウンロード",
         "select_geometry": "形状を選択してください。",
         "go_geometry": "形状一覧へ",
 

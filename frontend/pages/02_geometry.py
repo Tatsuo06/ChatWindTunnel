@@ -70,7 +70,7 @@ else:
                     st.session_state.pop(f"editing_geo_{geo['id']}", None)
                     st.rerun()
         else:
-            cols = st.columns([4, 1, 1, 1])
+            cols = st.columns([4, 1, 1, 1, 1])
             with cols[0]:
                 prefix  = "▶ " if is_selected else ""
                 name_md = f"**{prefix}{geo['name']}**" if is_selected else f"{prefix}{geo['name']}"
@@ -83,10 +83,18 @@ else:
                     st.session_state.pop("sim_id", None)
                     st.switch_page("pages/03_case.py")
             with cols[2]:
+                if geo.get("cad_file_path"):
+                    result = api.download_cad(geo["id"])
+                    if result:
+                        file_bytes, filename = result
+                        st.download_button("⬇", data=file_bytes, file_name=filename,
+                                           key=f"dl_{geo['id']}", help=t("download_cad"),
+                                           use_container_width=True)
+            with cols[3]:
                 if st.button("✏️", key=f"edit_geo_{geo['id']}", help=t("rename")):
                     st.session_state[f"editing_geo_{geo['id']}"] = True
                     st.rerun()
-            with cols[3]:
+            with cols[4]:
                 if st.button("🗑", key=f"del_{geo['id']}", help=t("delete_geo")):
                     if api.delete_geometry(geo["id"]):
                         if st.session_state.get("geo_id") == geo["id"]:

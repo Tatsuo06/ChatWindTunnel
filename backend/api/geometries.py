@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -103,6 +104,24 @@ async def delete_geometry(geo_id: int, current_user: CurrentUser, db: DB):
     _assert_project_access(geo.project, current_user)
     await db.delete(geo)
     await db.commit()
+
+
+@router.get("/geometries/{geo_id}/download-cad")
+async def download_cad(geo_id: int, current_user: CurrentUser, db: DB):
+    """Download the original uploaded CAD file."""
+    result = await db.execute(
+        select(Geometry).where(Geometry.id == geo_id).options(selectinload(Geometry.project))
+    )
+    geo = result.scalar_one_or_none()
+    if not geo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geometry not found")
+    _assert_project_access(geo.project, current_user)
+    if not geo.cad_file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No CAD file uploaded")
+    path = Path(geo.cad_file_path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CAD file not found on disk")
+    return FileResponse(str(path), filename=path.name, media_type="application/octet-stream")
 
 
 @router.get("/geometries/{geo_id}/bbox")

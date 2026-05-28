@@ -104,6 +104,15 @@ def get_geometry_bbox(geo_id: int) -> dict | None:
     return r.json() if r.ok else None
 
 
+def download_cad(geo_id: int) -> tuple[bytes, str] | None:
+    r = _get(f"/geometries/{geo_id}/download-cad")
+    if not r.ok:
+        return None
+    cd = r.headers.get("content-disposition", "")
+    filename = cd.split("filename=")[-1].strip('"') if "filename=" in cd else "model"
+    return r.content, filename
+
+
 def rename_geometry(geo_id: int, name: str) -> dict | None:
     r = _patch(f"/geometries/{geo_id}", json={"name": name})
     return r.json() if r.ok else None
