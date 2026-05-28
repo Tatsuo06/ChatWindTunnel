@@ -121,7 +121,8 @@ async def download_cad(geo_id: int, current_user: CurrentUser, db: DB):
     path = Path(geo.cad_file_path)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CAD file not found on disk")
-    return FileResponse(str(path), filename=path.name, media_type="application/octet-stream")
+    filename = f"{geo.name}{path.suffix}"
+    return FileResponse(str(path), filename=filename, media_type="application/octet-stream")
 
 
 @router.get("/geometries/{geo_id}/bbox")
