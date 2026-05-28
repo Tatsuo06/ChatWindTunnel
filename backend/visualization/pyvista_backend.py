@@ -197,16 +197,31 @@ class PyVistaBackend(VisualizationBackend):
     def plot_mesh_surface(self, case_dir: Path, patch: str = "motorBike",
                           view: str = "iso") -> bytes:
         import json, numpy as np
-        foam_file = case_dir / "case.foam"
-        reader = pv.OpenFOAMReader(str(foam_file))
-        if not reader.time_values:
-            return _empty_plot("No mesh data found")
-        reader.set_active_time_value(reader.time_values[-1])
-        dataset = reader.read()
-        try:
-            mesh = dataset["boundary"][patch]
-        except (KeyError, TypeError):
-            return _empty_plot(f"Patch '{patch}' not found")
+
+        # Prefer pre-generated VTK from foamToVTK -noInternal (much smaller than full case)
+        vtk_candidates = sorted(
+            list(case_dir.glob(f"VTK/**/*{patch}*.vtp")) +
+            list(case_dir.glob(f"VTK/**/*{patch}*.vtk")),
+        )
+        if vtk_candidates:
+            try:
+                mesh = pv.read(str(vtk_candidates[-1]))
+            except Exception:
+                mesh = None
+        else:
+            mesh = None
+
+        if mesh is None:
+            foam_file = case_dir / "case.foam"
+            reader = pv.OpenFOAMReader(str(foam_file))
+            if not reader.time_values:
+                return _empty_plot("No mesh data found")
+            reader.set_active_time_value(reader.time_values[-1])
+            dataset = reader.read()
+            try:
+                mesh = dataset["boundary"][patch]
+            except (KeyError, TypeError):
+                return _empty_plot(f"Patch '{patch}' not found")
 
         pl = pv.Plotter(off_screen=True, window_size=(1200, 800))
         pl.set_background("white")

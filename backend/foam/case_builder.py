@@ -82,6 +82,8 @@ _ALLRUN_STEADY = textwrap.dedent("""\
     runApplication reconstructParMesh -constant
 
     runApplication reconstructPar -latestTime
+
+    runApplication foamToVTK -noInternal -latestTime -fields '()'
 """)
 
 _ALLRUN_LES = textwrap.dedent("""\
@@ -964,7 +966,7 @@ def _write_streamlines(case_dir: Path, params: dict) -> None:
         );
     }}"""
 
-    fields_str = f"p U {turb_field}" if turb_field else "p U"
+    fields_str = "U"
 
     content = f"""\
 /*--------------------------------*- C++ -*----------------------------------*\\
