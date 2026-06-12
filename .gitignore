@@ -1,4 +1,8 @@
 .env
+TODO.md
+start.sh
+init.sh
+reboot.sh
 __pycache__/
 *.py[cod]
 *.egg-info/

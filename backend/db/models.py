@@ -67,6 +67,7 @@ class Geometry(Base):
     name = Column(String(128), nullable=False, default="")
     cad_file_path = Column(String(512), default="")
     stl_file_path = Column(String(512), default="")
+    transform_info = Column(JSON, default=None)  # {"mm_to_m": bool, "scale": float, "yaw": ..., "pitch": ..., "roll": ...}
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     project = relationship("Project", back_populates="geometries")

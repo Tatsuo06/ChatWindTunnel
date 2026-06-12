@@ -43,7 +43,7 @@ wallBoundedStreamLines
     type            wallBoundedStreamLine;
     libs            (fieldFunctionObjects);
     U               UNear;           // Velocity field to use for tracking.
-    fields          (p U k UNear);   // Names of fields to sample.
+    fields          (UNear);         // Tracking velocity only; minimal storage.
     setFormat       vtk;    // raw | gnuplot | xmgr
     direction       forward;
     lifeTime        100;    // Steps particles can travel before being removed

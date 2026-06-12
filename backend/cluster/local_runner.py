@@ -12,15 +12,24 @@ from backend.core.config import settings
 
 
 def _foam_cmd() -> str:
-    """Return the OpenFOAM launch command path, or raise if not configured."""
+    """Return the OpenFOAM launch command path, or raise if not available."""
     app = settings.FOAM_LOCAL_APP
     cmd = str(Path(app) / "Contents" / "Resources" / "etc" / "openfoam")
     if not Path(cmd).exists():
         raise RuntimeError(
             f"Local OpenFOAM not found at {cmd}. "
-            "Set FOAM_LOCAL_APP in .env to your OpenFOAM app path, "
-            "or set CLUSTER_USER to use the cluster runner instead."
+            "Set FOAM_LOCAL_APP in .env to your OpenFOAM app path."
         )
+    return cmd
+
+
+def local_foam_available() -> bool:
+    """Return True if local OpenFOAM is installed and runnable."""
+    try:
+        _foam_cmd()
+        return True
+    except RuntimeError:
+        return False
 
 # Map job_id → status dict
 _jobs: dict[str, dict] = {}
@@ -56,6 +65,7 @@ def _run_allrun(case_dir: Path, job_id: str) -> None:
 
 class LocalRunner(JobRunner):
     def submit(self, case_dir: Path, n_processors: int, job_name: str) -> str:
+        _foam_cmd()  # raises immediately if OpenFOAM not installed
         job_id = _next_id()
         with _lock:
             _jobs[job_id] = {"status": "PENDING", "case_dir": str(case_dir)}

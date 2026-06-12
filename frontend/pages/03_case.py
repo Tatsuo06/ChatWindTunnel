@@ -5,6 +5,84 @@ import frontend.api_client as api
 from frontend.i18n import t
 
 
+def _box_trace(xmin, xmax, ymin, ymax, zmin, zmax, color, name):
+    import plotly.graph_objects as go
+    x, y, z = [], [], []
+    for p1, p2 in [
+        [(xmin,ymin,zmin),(xmax,ymin,zmin)], [(xmax,ymin,zmin),(xmax,ymax,zmin)],
+        [(xmax,ymax,zmin),(xmin,ymax,zmin)], [(xmin,ymax,zmin),(xmin,ymin,zmin)],
+        [(xmin,ymin,zmax),(xmax,ymin,zmax)], [(xmax,ymin,zmax),(xmax,ymax,zmax)],
+        [(xmax,ymax,zmax),(xmin,ymax,zmax)], [(xmin,ymax,zmax),(xmin,ymin,zmax)],
+        [(xmin,ymin,zmin),(xmin,ymin,zmax)], [(xmax,ymin,zmin),(xmax,ymin,zmax)],
+        [(xmax,ymax,zmin),(xmax,ymax,zmax)], [(xmin,ymax,zmin),(xmin,ymax,zmax)],
+    ]:
+        x += [p1[0], p2[0], None]; y += [p1[1], p2[1], None]; z += [p1[2], p2[2], None]
+    return go.Scatter3d(x=x, y=y, z=z, mode="lines",
+                        line=dict(color=color, width=2),
+                        name=name, showlegend=True, hoverinfo="skip")
+
+
+def _show_geometry_3d(data: dict) -> None:
+    import plotly.graph_objects as go
+    import pyvista as pv
+
+    try:
+        mesh = pv.read(data["stl_path"]).triangulate()
+    except Exception:
+        return
+
+    verts = mesh.points
+    faces = mesh.faces.reshape(-1, 4)[:, 1:]
+
+    fig = go.Figure()
+    fig.add_trace(go.Mesh3d(
+        x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
+        i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+        color="lightsteelblue", opacity=0.85, name="Geometry",
+        flatshading=False, showlegend=True,
+        lighting=dict(ambient=0.4, diffuse=0.8, specular=0.3),
+        lightposition=dict(x=1, y=1, z=2),
+    ))
+    d = data["domain"]
+    fig.add_trace(_box_trace(d["xmin"], d["xmax"], d["ymin"], d["ymax"],
+                             d["zmin"], d["zmax"], "royalblue", t("domain_box")))
+    r = data["refbox"]
+    fig.add_trace(_box_trace(r["xmin"], r["xmax"], r["ymin"], r["ymax"],
+                             r["zmin"], r["zmax"], "limegreen", t("refine_box")))
+
+    # Wind direction arrow (+X) at inlet face
+    zmid = (d["zmin"] + d["zmax"]) / 2
+    arrow_len = (d["xmax"] - d["xmin"]) * 0.15
+    ax = d["xmin"] + arrow_len * 0.1
+    fig.add_trace(go.Scatter3d(
+        x=[d["xmin"], ax], y=[0, 0], z=[zmid, zmid],
+        mode="lines", line=dict(color="orange", width=4),
+        name=t("wind_dir"), showlegend=True, hoverinfo="skip",
+    ))
+    fig.add_trace(go.Cone(
+        x=[ax], y=[0], z=[zmid],
+        u=[arrow_len], v=[0], w=[0],
+        colorscale=[[0, "orange"], [1, "orange"]],
+        showscale=False, sizemode="absolute", sizeref=arrow_len * 0.6,
+        name="", showlegend=False, hoverinfo="skip",
+    ))
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=500,
+        legend=dict(x=0.01, y=0.99, bgcolor="rgba(0,0,0,0.4)", font=dict(color="white")),
+        scene=dict(
+            aspectmode="data",
+            xaxis_title="X (m)", yaxis_title="Y (m)", zaxis_title="Z (m)",
+            bgcolor="rgb(15,15,25)",
+            xaxis=dict(gridcolor="rgb(60,60,80)", zerolinecolor="rgb(120,120,160)"),
+            yaxis=dict(gridcolor="rgb(60,60,80)", zerolinecolor="rgb(120,120,160)"),
+            zaxis=dict(gridcolor="rgb(60,60,80)", zerolinecolor="rgb(120,120,160)"),
+        ),
+        paper_bgcolor="rgb(15,15,25)",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def _show_restart_expander(sim: dict, sim_id: int) -> None:
     with st.expander(t("restart_job"), expanded=False):
         current_end = int(sim.get("parameters", {}).get("end_time", 500))
@@ -74,14 +152,6 @@ with left:
     st.subheader(t("cases_title"))
     sims = api.list_simulations(geo_id)
 
-    # Auto-create a default case if none exist so chat is immediately usable
-    if not sims and not st.session_state.get("_autocreated_geo", 0) == geo_id:
-        default = api.create_simulation(geo_id, "case_01", "STEADY")
-        if default:
-            st.session_state["sim_id"] = default["id"]
-            st.session_state["_autocreated_geo"] = geo_id
-            st.rerun()
-
     with st.expander(t("new_case"), expanded=not sims):
         with st.form("new_sim_form"):
             sim_name = st.text_input(t("case_name"))
@@ -108,9 +178,9 @@ with left:
             # Yaw row
             yc0, yc1, yc2, yc3 = st.columns([2, 1, 1, 1])
             with yc0: st.markdown(t("sweep_axis_yaw"))
-            with yc1: sw_yaw_s = st.number_input("ys", value=0,  step=5,  label_visibility="collapsed")
-            with yc2: sw_yaw_e = st.number_input("ye", value=0,  step=5,  label_visibility="collapsed")
-            with yc3: sw_yaw_t = st.number_input("yt", value=10, step=5, min_value=1, label_visibility="collapsed")
+            with yc1: sw_yaw_s = st.number_input("ys", value=-180, step=5,  label_visibility="collapsed")
+            with yc2: sw_yaw_e = st.number_input("ye", value=170,  step=5,  label_visibility="collapsed")
+            with yc3: sw_yaw_t = st.number_input("yt", value=10,   step=5, min_value=1, label_visibility="collapsed")
 
             # Pitch row
             pc0, pc1, pc2, pc3 = st.columns([2, 1, 1, 1])
@@ -240,6 +310,11 @@ with right:
         st.error(t("case_not_found"))
         st.stop()
 
+    # Guard: sim belongs to a different geometry (stale session state)
+    if sim.get("geometry_id") != geo_id:
+        st.session_state.pop("sim_id", None)
+        st.rerun()
+
     geo = api.get_geometry(geo_id)
 
     if st.session_state.get("editing_sim_header"):
@@ -276,9 +351,9 @@ with right:
     # ── Setup ──────────────────────────────────────────────────
     with tab_setup:
         if geo and geo.get("stl_file_path"):
-            preview = api.get_geometry_preview(sim_id)
-            if preview:
-                st.image(preview, caption=t("geo_preview"), use_container_width=True)
+            data = api.get_geometry_3d_data(sim_id)
+            if data:
+                _show_geometry_3d(data)
 
         st.markdown(f"#### {t('wind_settings')}")
         col1, col2, col3, col4 = st.columns(4)
@@ -334,11 +409,7 @@ with right:
                 x1, y1, z1 = bbox["max"]
                 display_params["aref"] = round((y1 - y0) * (z1 - z0), 4)
                 display_params["lref"] = round(x1 - x0, 4)
-                display_params["cofr"] = [
-                    round((x0 + x1) / 2, 4),
-                    round((y0 + y1) / 2, 4),
-                    round((z0 + z1) / 2, 4),
-                ]
+                display_params["cofr"] = [round((x0 + x1) / 2, 4), round((y0 + y1) / 2, 4), round((z0 + z1) / 2, 4)]
             st.caption(t("domain_auto_note"))
         else:
             display_params = params
@@ -367,12 +438,27 @@ with right:
         if geo and not geo.get("stl_file_path"):
             st.warning(t("no_cad"))
 
+        # Runner selection (only shown when both options are available)
+        _runner_info = api.get_runner_info()
+        _both_available = _runner_info.get("cluster_available") and _runner_info.get("local_available")
+        _only_local = _runner_info.get("local_available") and not _runner_info.get("cluster_available")
+        if _both_available:
+            _runner_choice = st.radio(
+                t("runner_select"), ["Cluster", "Local"],
+                horizontal=True, key=f"runner_{sim_id}",
+            )
+            _runner_type = "cluster" if _runner_choice == "Cluster" else "local"
+        elif _only_local:
+            _runner_type = "local"
+        else:
+            _runner_type = "cluster"
+
         col1, col2, col3 = st.columns(3)
         with col1:
             disabled = current_status in ("MESHING", "RUNNING") or (geo and not geo.get("stl_file_path"))
             if st.button(t("submit_job"), disabled=disabled, use_container_width=True):
                 with st.spinner(t("submitting")):
-                    result = api.submit_job(sim_id)
+                    result = api.submit_job(sim_id, runner_type=_runner_type)
                 if result:
                     st.success(t("job_submitted", result.get("job_id")))
                     st.rerun()
@@ -504,19 +590,25 @@ with right:
                 st.info(t("plane_not_found"))
 
         with tab_stream:
-            st.subheader(t("streamlines"))
+            stream_type = st.radio(
+                "Streamline type",
+                ["Free-space streamlines", "Wall-bounded streamlines"],
+                horizontal=True, key="stream_type",
+            )
+            st.subheader(t("streamlines") if stream_type == "Free-space streamlines" else "Wall-bounded streamlines")
             interactive = st.toggle("インタラクティブ 3D", value=False, key="stream_3d")
-            if interactive:
-                try:
-                    import pyvista as pv
-                    import numpy as np
-                    import plotly.graph_objects as go
 
-                    paths = api.get_streamlines_paths(sim_id)
-                    if paths:
-                        # 全VTPのU_mag最大値を先に計算
+            if stream_type == "Wall-bounded streamlines":
+                paths = api.get_wall_streamlines_paths(sim_id)
+                if paths:
+                    try:
+                        import pyvista as pv
+                        import numpy as np
+                        import plotly.graph_objects as go
+
+                        vtk_paths = paths["vtk_paths"]
                         meshes, u_mags = [], []
-                        for vp in paths["vtk_paths"]:
+                        for vp in vtk_paths:
                             m = pv.read(vp)
                             if m.n_points == 0:
                                 continue
@@ -525,67 +617,123 @@ with right:
                             ) else None
                             meshes.append(m)
                             u_mags.append(u)
-                        u_max = max(
-                            (float(u.max()) for u in u_mags if u is not None), default=1.0
-                        )
 
-                        fig = go.Figure()
+                        if meshes:
+                            u_max = max(
+                                (float(u.max()) for u in u_mags if u is not None), default=1.0
+                            )
+                            fig = go.Figure()
+                            if paths.get("stl_path"):
+                                stl = pv.read(paths["stl_path"])
+                                stl = stl.triangulate()
+                                faces = stl.faces.reshape(-1, 4)[:, 1:]
+                                fig.add_trace(go.Mesh3d(
+                                    x=stl.points[:, 0], y=stl.points[:, 1], z=stl.points[:, 2],
+                                    i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+                                    color="lightgray", opacity=1.0,
+                                    showlegend=False, hoverinfo="skip", flatshading=True,
+                                    lighting=dict(ambient=0.8, diffuse=0.5),
+                                ))
+                            for mesh, u_mag in zip(meshes, u_mags):
+                                pts = mesh.points
+                                xs, ys, zs, cs = [], [], [], []
+                                for i in range(mesh.n_cells):
+                                    cell = mesh.get_cell(i)
+                                    idx = [cell.point_ids[j] for j in range(cell.n_points)]
+                                    xs.extend(pts[idx, 0].tolist()); xs.append(None)
+                                    ys.extend(pts[idx, 1].tolist()); ys.append(None)
+                                    zs.extend(pts[idx, 2].tolist()); zs.append(None)
+                                    if u_mag is not None:
+                                        cs.extend((u_mag[idx] / u_max).tolist()); cs.append(float("nan"))
+                                fig.add_trace(go.Scatter3d(
+                                    x=xs, y=ys, z=zs, mode="lines",
+                                    line=dict(width=2, color=cs if cs else "orange",
+                                              colorscale="Jet", cmin=0, cmax=1),
+                                    showlegend=False, hoverinfo="skip",
+                                ))
+                            fig.update_layout(
+                                scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
+                                           aspectmode="data"),
+                                height=600, margin=dict(l=0, r=0, t=0, b=0),
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("Wall-bounded streamline files are empty.")
+                    except Exception as e:
+                        st.error(f"3D表示エラー: {e}")
+                else:
+                    st.info("Wall-bounded streamlines data not available locally. "
+                            "This data is stored on the cluster and excluded from the default rsync "
+                            "to reduce download size (~500 MB/case).")
 
-                        # STL 物体を半透明メッシュで追加（67万→3万三角形に間引き）
-                        if paths.get("stl_path"):
-                            stl = pv.read(paths["stl_path"])
-                            stl = stl.triangulate()
-                            faces = stl.faces.reshape(-1, 4)[:, 1:]
-                            fig.add_trace(go.Mesh3d(
-                                x=stl.points[:, 0],
-                                y=stl.points[:, 1],
-                                z=stl.points[:, 2],
-                                i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
-                                color="lightgray", opacity=1.0,
-                                showlegend=False, hoverinfo="skip",
-                                flatshading=True,
-                                lighting=dict(ambient=0.8, diffuse=0.5),
-                            ))
+            else:
+                # --- Free-space streamlines ---
+                if interactive:
+                    try:
+                        import pyvista as pv
+                        import numpy as np
+                        import plotly.graph_objects as go
 
-                        # VTPファイルごとに1トレース（全トラックをNoneで結合）
-                        for mesh, u_mag in zip(meshes, u_mags):
-                            pts = mesh.points
-                            xs, ys, zs, cs = [], [], [], []
-                            for i in range(mesh.n_cells):
-                                cell = mesh.get_cell(i)
-                                idx = [cell.point_ids[j] for j in range(cell.n_points)]
-                                xs.extend(pts[idx, 0].tolist()); xs.append(None)
-                                ys.extend(pts[idx, 1].tolist()); ys.append(None)
-                                zs.extend(pts[idx, 2].tolist()); zs.append(None)
-                                if u_mag is not None:
-                                    cs.extend((u_mag[idx] / u_max).tolist()); cs.append(float("nan"))
-                            fig.add_trace(go.Scatter3d(
-                                x=xs, y=ys, z=zs, mode="lines",
-                                line=dict(width=2,
-                                          color=cs if cs else "orange",
-                                          colorscale="Jet", cmin=0, cmax=1),
-                                showlegend=False, hoverinfo="skip",
-                            ))
-
-                        fig.update_layout(
-                            scene=dict(
-                                xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
-                                aspectmode="data",
-                            ),
-                            height=600,
-                            margin=dict(l=0, r=0, t=0, b=0),
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+                        paths = api.get_streamlines_paths(sim_id)
+                        if paths:
+                            meshes, u_mags = [], []
+                            for vp in paths["vtk_paths"]:
+                                m = pv.read(vp)
+                                if m.n_points == 0:
+                                    continue
+                                u = np.linalg.norm(m.point_data["U"], axis=1) if (
+                                    "U" in m.point_data and m.point_data["U"].ndim == 2
+                                ) else None
+                                meshes.append(m)
+                                u_mags.append(u)
+                            u_max = max(
+                                (float(u.max()) for u in u_mags if u is not None), default=1.0
+                            )
+                            fig = go.Figure()
+                            if paths.get("stl_path"):
+                                stl = pv.read(paths["stl_path"])
+                                stl = stl.triangulate()
+                                faces = stl.faces.reshape(-1, 4)[:, 1:]
+                                fig.add_trace(go.Mesh3d(
+                                    x=stl.points[:, 0], y=stl.points[:, 1], z=stl.points[:, 2],
+                                    i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+                                    color="lightgray", opacity=1.0,
+                                    showlegend=False, hoverinfo="skip", flatshading=True,
+                                    lighting=dict(ambient=0.8, diffuse=0.5),
+                                ))
+                            for mesh, u_mag in zip(meshes, u_mags):
+                                pts = mesh.points
+                                xs, ys, zs, cs = [], [], [], []
+                                for i in range(mesh.n_cells):
+                                    cell = mesh.get_cell(i)
+                                    idx = [cell.point_ids[j] for j in range(cell.n_points)]
+                                    xs.extend(pts[idx, 0].tolist()); xs.append(None)
+                                    ys.extend(pts[idx, 1].tolist()); ys.append(None)
+                                    zs.extend(pts[idx, 2].tolist()); zs.append(None)
+                                    if u_mag is not None:
+                                        cs.extend((u_mag[idx] / u_max).tolist()); cs.append(float("nan"))
+                                fig.add_trace(go.Scatter3d(
+                                    x=xs, y=ys, z=zs, mode="lines",
+                                    line=dict(width=2, color=cs if cs else "orange",
+                                              colorscale="Jet", cmin=0, cmax=1),
+                                    showlegend=False, hoverinfo="skip",
+                                ))
+                            fig.update_layout(
+                                scene=dict(xaxis_title="X", yaxis_title="Y", zaxis_title="Z",
+                                           aspectmode="data"),
+                                height=600, margin=dict(l=0, r=0, t=0, b=0),
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info(t("stream_not_found"))
+                    except Exception as e:
+                        st.error(f"3D表示エラー: {e}")
+                else:
+                    img = api.get_streamlines_plot(sim_id)
+                    if img:
+                        st.image(img, use_container_width=True)
                     else:
                         st.info(t("stream_not_found"))
-                except Exception as e:
-                    st.error(f"3D表示エラー: {e}")
-            else:
-                img = api.get_streamlines_plot(sim_id)
-                if img:
-                    st.image(img, use_container_width=True)
-                else:
-                    st.info(t("stream_not_found"))
 
         _chat_section(
             sim_id,

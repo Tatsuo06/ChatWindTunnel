@@ -67,13 +67,25 @@ def _rsync_up(local_dir: Path, remote_dir: str) -> None:
 
 
 def _rsync_down(remote_dir: str, local_dir: Path) -> None:
-    """Download cluster remote_dir to local_dir via rsync, skipping processor*/ and ensightWrite/."""
+    """Download cluster remote_dir to local_dir via rsync.
+
+    Excluded to reduce transfer size (~1 GB → ~50 MB per case):
+    - processor[0-9]*/          : decomposed parallel dirs (not needed after reconstructPar)
+    - postProcessing/ensightWrite: large ensight output, not used
+    - postProcessing/sets/wallBoundedStreamLines: large; visualization uses postProcessing only
+    - constant/polyMesh/        : ~250 MB full mesh; VTK/ from foamToVTK used instead
+    - /[0-9]*/                  : reconstructed time directories (~180 MB); VTK/ used instead
+                                  (anchored so postProcessing/forceCoeffs1/0/ is preserved)
+    """
     key = str(Path(settings.CLUSTER_SSH_KEY).expanduser())
     remote = f"{settings.CLUSTER_USER}@{settings.CLUSTER_HOST}:{remote_dir}/"
     subprocess.run(
         ["rsync", "-az",
          "--exclude=processor[0-9]*",
          "--exclude=postProcessing/ensightWrite",
+         "--exclude=postProcessing/sets/wallBoundedStreamLines",
+         "--exclude=constant/polyMesh/",
+         "--exclude=/[0-9]*/",
          "-e", f"ssh -i {key} -o StrictHostKeyChecking=no -o BatchMode=yes",
          remote, f"{local_dir}/"],
         check=True,

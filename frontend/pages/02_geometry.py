@@ -4,6 +4,42 @@ import streamlit as st
 import frontend.api_client as api
 from frontend.i18n import t
 
+
+def _show_geometry_3d(stl_path: str) -> None:
+    import plotly.graph_objects as go
+    import pyvista as pv
+
+    try:
+        mesh = pv.read(stl_path).triangulate()
+    except Exception:
+        return
+
+    verts = mesh.points
+    faces = mesh.faces.reshape(-1, 4)[:, 1:]
+
+    fig = go.Figure(go.Mesh3d(
+        x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
+        i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+        color="lightsteelblue", opacity=0.85,
+        flatshading=False,
+        lighting=dict(ambient=0.4, diffuse=0.8, specular=0.3),
+        lightposition=dict(x=1, y=1, z=2),
+    ))
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=400,
+        scene=dict(
+            aspectmode="data",
+            xaxis_title="X (m)", yaxis_title="Y (m)", zaxis_title="Z (m)",
+            bgcolor="rgb(15,15,25)",
+            xaxis=dict(gridcolor="rgb(60,60,80)", zerolinecolor="rgb(120,120,160)"),
+            yaxis=dict(gridcolor="rgb(60,60,80)", zerolinecolor="rgb(120,120,160)"),
+            zaxis=dict(gridcolor="rgb(60,60,80)", zerolinecolor="rgb(120,120,160)"),
+        ),
+        paper_bgcolor="rgb(15,15,25)",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
 if "token" not in st.session_state:
     st.warning(t("login_required"))
     st.stop()
@@ -28,12 +64,22 @@ with st.expander(t("add_geometry"), expanded=False):
             t("scale_factor"), value=1.0, min_value=1e-6, format="%.6f",
             help="1.0 = no change, 0.001 = mm→m",
         )
+        st.info(t("rotation_wind_note"))
+        rc1, rc2, rc3 = st.columns(3)
+        with rc1:
+            upload_yaw   = st.number_input("Yaw (°)",   value=0.0, format="%.1f", help="Z軸回転")
+        with rc2:
+            upload_pitch = st.number_input("Pitch (°)", value=0.0, format="%.1f", help="Y軸回転")
+        with rc3:
+            upload_roll  = st.number_input("Roll (°)",  value=0.0, format="%.1f", help="X軸回転")
         if st.form_submit_button(t("upload"), use_container_width=True):
             if uploaded:
                 with st.spinner(t("converting")):
                     name = geo_name or uploaded.name.rsplit(".", 1)[0]
                     geo = api.create_geometry(project_id, name)
-                    result = api.upload_cad(geo["id"], uploaded.read(), uploaded.name, scale=upload_scale) if geo else None
+                    result = api.upload_cad(geo["id"], uploaded.read(), uploaded.name,
+                                            scale=upload_scale, yaw=upload_yaw,
+                                            pitch=upload_pitch, roll=upload_roll) if geo else None
                 if result:
                     st.session_state["geo_id"] = result["id"]
                     st.session_state["geo_name"] = result["name"]
@@ -119,9 +165,21 @@ else:
                     t("scale_factor"), value=1.0, min_value=1e-6, format="%.6f",
                     help="1.0 = no change, 0.001 = mm→m", key=f"ru_scale_{geo['id']}",
                 )
+                st.info(t("rotation_wind_note"))
+                rrc1, rrc2, rrc3 = st.columns(3)
+                with rrc1:
+                    ru_yaw   = st.number_input("Yaw (°)",   value=0.0, format="%.1f",
+                                               help="Z軸回転", key=f"ru_yaw_{geo['id']}")
+                with rrc2:
+                    ru_pitch = st.number_input("Pitch (°)", value=0.0, format="%.1f",
+                                               help="Y軸回転", key=f"ru_pitch_{geo['id']}")
+                with rrc3:
+                    ru_roll  = st.number_input("Roll (°)",  value=0.0, format="%.1f",
+                                               help="X軸回転", key=f"ru_roll_{geo['id']}")
                 if up:
                     with st.spinner(t("converting")):
-                        result = api.upload_cad(geo["id"], up.read(), up.name, scale=ru_scale)
+                        result = api.upload_cad(geo["id"], up.read(), up.name, scale=ru_scale,
+                                                yaw=ru_yaw, pitch=ru_pitch, roll=ru_roll)
                     if result:
                         st.success(t("geo_uploaded", result["name"]))
                         st.rerun()
@@ -129,14 +187,38 @@ else:
                         st.error(t("upload_fail"))
 
         if geo.get("stl_file_path"):
-            bbox = api.get_geometry_bbox(geo["id"])
-            if bbox:
-                mn, mx = bbox["min"], bbox["max"]
+            try:
+                import pyvista as pv
+                _mesh = pv.read(geo["stl_file_path"])
+                _mn = _mesh.bounds[0::2]  # xmin, ymin, zmin
+                _mx = _mesh.bounds[1::2]  # xmax, ymax, zmax
                 st.caption(
                     f"Bounding box — "
-                    f"X: {mn[0]:.3f} → {mx[0]:.3f} m &nbsp;|&nbsp; "
-                    f"Y: {mn[1]:.3f} → {mx[1]:.3f} m &nbsp;|&nbsp; "
-                    f"Z: {mn[2]:.3f} → {mx[2]:.3f} m &nbsp;|&nbsp; "
-                    f"L×W×H: {mx[0]-mn[0]:.3f} × {mx[1]-mn[1]:.3f} × {mx[2]-mn[2]:.3f} m"
+                    f"X: {_mn[0]:.3f} → {_mx[0]:.3f} m &nbsp;|&nbsp; "
+                    f"Y: {_mn[1]:.3f} → {_mx[1]:.3f} m &nbsp;|&nbsp; "
+                    f"Z: {_mn[2]:.3f} → {_mx[2]:.3f} m &nbsp;|&nbsp; "
+                    f"L×W×H: {_mx[0]-_mn[0]:.3f} × {_mx[1]-_mn[1]:.3f} × {_mx[2]-_mn[2]:.3f} m"
                 )
+            except Exception:
+                pass
+            ti = geo.get("transform_info")
+            if ti:
+                steps = [f"📄 {ti.get('source', '?')}"]
+                if ti.get("mm_to_m"):
+                    steps.append("mm→m (×0.001)")
+                if ti.get("scale", 1.0) != 1.0:
+                    steps.append(f"×{ti['scale']:g}")
+                rot = [f"{label} {ti[key]:g}°"
+                       for key, label in (("yaw", "Yaw"), ("pitch", "Pitch"), ("roll", "Roll"))
+                       if ti.get(key)]
+                if rot:
+                    steps.append(", ".join(rot))
+                st.caption(" → ".join(steps))
+            interactive = st.toggle(t("interactive_3d"), value=False, key=f"geo_3d_{geo['id']}")
+            if interactive:
+                _show_geometry_3d(geo["stl_file_path"])
+            else:
+                preview = api.get_geometry_preview_by_geo(geo["id"])
+                if preview:
+                    st.image(preview, use_container_width=True)
         st.divider()

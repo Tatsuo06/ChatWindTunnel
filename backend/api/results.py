@@ -98,6 +98,60 @@ async def geometry_preview(sim_id: int, current_user: CurrentUser, db: DB):
             tmp_path.unlink()
 
 
+@router.get("/geometry-3d-data")
+async def geometry_3d_data(sim_id: int, current_user: CurrentUser, db: DB):
+    """Return STL path + domain/refbox params for interactive 3D preview."""
+    import json as _json
+    from backend.cad.converter import rotate_stl
+    from backend.foam.case_builder import _auto_domain_params, _refbox_from_rotated_stl
+
+    sim = await _get_done_sim(sim_id, db)
+    if not sim.geometry.stl_file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No STL available")
+
+    original_stl = Path(sim.geometry.stl_file_path)
+
+    # Use existing rotated STL if available and angles match
+    rotated = Path(sim.case_dir) / "constant" / "triSurface" / "motorBike.stl" if sim.case_dir else None
+    params_file = Path(sim.case_dir) / "case_params.json" if sim.case_dir else None
+    stl_path = original_stl
+
+    if rotated and rotated.exists() and params_file and params_file.exists():
+        p = _json.loads(params_file.read_text())
+        if (abs(p.get("yaw_deg", 0) - sim.yaw_deg) < 0.01 and
+                abs(p.get("pitch_deg", 0) - sim.pitch_deg) < 0.01 and
+                abs(p.get("roll_deg", 0) - sim.roll_deg) < 0.01):
+            stl_path = rotated
+    elif sim.yaw_deg or sim.pitch_deg or sim.roll_deg:
+        # Save to persistent preview path (not temp) so frontend can read it
+        preview_stl = original_stl.parent / f"preview_{sim_id}.stl"
+        rotate_stl(original_stl, preview_stl, sim.yaw_deg, sim.pitch_deg, sim.roll_deg)
+        stl_path = preview_stl
+
+    domain = _auto_domain_params(original_stl)
+    refbox = {**domain, **_refbox_from_rotated_stl(stl_path)}
+    s = domain["domain_scale"]
+    return {
+        "stl_path": str(stl_path),
+        "domain": {
+            "xmin": domain["domain_xmin"] * s,
+            "xmax": domain["domain_xmax"] * s,
+            "ymin": -domain["domain_yhalf"] * s,
+            "ymax":  domain["domain_yhalf"] * s,
+            "zmin": 0.0,
+            "zmax": domain["domain_zmax"] * s,
+        },
+        "refbox": {
+            "xmin": refbox["refbox_min"][0],
+            "xmax": refbox["refbox_max"][0],
+            "ymin": refbox["refbox_min"][1],
+            "ymax": refbox["refbox_max"][1],
+            "zmin": refbox["refbox_min"][2],
+            "zmax": refbox["refbox_max"][2],
+        },
+    }
+
+
 @router.get("/residuals")
 async def residuals(sim_id: int, current_user: CurrentUser, db: DB):
     sim = await _get_done_sim(sim_id, db)
@@ -201,20 +255,17 @@ async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
     if peak_mem.get("snappyHexMesh") is not None:
         info["peak_memory_snappy_kb"] = peak_mem["snappyHexMesh"]
 
-    foam_file = case_dir / "case.foam"
-    if foam_file.exists():
+    # Count surface cells from foamToVTK output (avoids needing time directories)
+    vtk_candidates = sorted(
+        list(case_dir.glob("VTK/**/*motorBike*.vtp")) +
+        list(case_dir.glob("VTK/**/*object*.vtp")) +
+        list(case_dir.glob("VTK/**/*motorBike*.vtk")) +
+        list(case_dir.glob("VTK/**/*object*.vtk")),
+    )
+    if vtk_candidates:
         try:
-            reader = pv.OpenFOAMReader(str(foam_file))
-            if reader.time_values:
-                reader.set_active_time_value(reader.time_values[-1])
-                dataset = reader.read()
-                for patch_name in ("motorBike", "object"):
-                    try:
-                        surface_mesh = dataset["boundary"][patch_name]
-                        info["surface_cells"] = surface_mesh.n_cells
-                        break
-                    except (KeyError, TypeError):
-                        pass
+            surface_mesh = pv.read(str(vtk_candidates[-1]))
+            info["surface_cells"] = surface_mesh.n_cells
         except Exception:
             pass
 
@@ -314,6 +365,38 @@ async def streamlines_paths(sim_id: int, current_user: CurrentUser, db: DB):
 
     if not vtk_paths:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No streamline data")
+
+    stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
+    return {
+        "vtk_paths": vtk_paths,
+        "stl_path": str(stl_path) if stl_path.exists() else None,
+    }
+
+
+@router.get("/wall-streamlines-paths")
+async def wall_streamlines_paths(sim_id: int, current_user: CurrentUser, db: DB):
+    """Return local file paths of wall-bounded streamline VTKs for interactive rendering."""
+    sim = await _get_done_sim(sim_id, db)
+    if not sim.case_dir:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+
+    case_dir = Path(sim.case_dir)
+
+    def _latest_vtks(pattern: str) -> list[Path]:
+        all_files = list(case_dir.glob(pattern))
+        if not all_files:
+            return []
+        latest_time = max(
+            (float(p.parent.name) for p in all_files if p.parent.name.replace(".", "").isdigit()),
+            default=None,
+        )
+        if latest_time is None:
+            return all_files
+        return [p for p in all_files if p.parent.name == str(int(latest_time)) or p.parent.name == str(latest_time)]
+
+    vtk_paths = [str(p) for p in _latest_vtks("postProcessing/sets/wallBoundedStreamLines/**/*.vtp")]
+    if not vtk_paths:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No wall streamline data")
 
     stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
     return {

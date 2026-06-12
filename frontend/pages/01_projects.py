@@ -29,23 +29,23 @@ else:
     for proj in projects:
         editing = st.session_state.get(f"editing_proj_{proj['id']}", False)
         if editing:
-            col1, col2 = st.columns([5, 2])
-            with col1:
-                new_name = st.text_input(t("project_name"), value=proj["name"],
-                                         key=f"rename_proj_{proj['id']}", label_visibility="collapsed")
-            with col2:
-                bcol1, bcol2 = st.columns(2)
-                with bcol1:
-                    if st.button(t("save"), key=f"save_proj_{proj['id']}", use_container_width=True):
-                        if new_name.strip() and api.rename_project(proj["id"], new_name.strip()):
-                            if st.session_state.get("project_id") == proj["id"]:
-                                st.session_state["project_name"] = new_name.strip()
-                            st.session_state.pop(f"editing_proj_{proj['id']}", None)
-                            st.rerun()
-                with bcol2:
-                    if st.button(t("cancel"), key=f"cancel_proj_{proj['id']}", use_container_width=True):
+            new_name = st.text_input(t("project_name"), value=proj["name"],
+                                     key=f"rename_proj_{proj['id']}")
+            new_desc = st.text_area(t("description"), value=proj.get("description", ""),
+                                    key=f"redesc_proj_{proj['id']}", height=80)
+            bcol1, bcol2 = st.columns(2)
+            with bcol1:
+                if st.button(t("save"), key=f"save_proj_{proj['id']}", use_container_width=True):
+                    if new_name.strip():
+                        api.rename_project(proj["id"], new_name.strip(), description=new_desc)
+                        if st.session_state.get("project_id") == proj["id"]:
+                            st.session_state["project_name"] = new_name.strip()
                         st.session_state.pop(f"editing_proj_{proj['id']}", None)
                         st.rerun()
+            with bcol2:
+                if st.button(t("cancel"), key=f"cancel_proj_{proj['id']}", use_container_width=True):
+                    st.session_state.pop(f"editing_proj_{proj['id']}", None)
+                    st.rerun()
         else:
             col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
             with col1:

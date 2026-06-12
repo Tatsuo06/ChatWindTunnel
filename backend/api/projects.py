@@ -136,6 +136,21 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
                 continue
             tail = df.iloc[max(0, int(len(df) * 0.8)):]
             avg = tail.mean(numeric_only=True)
+
+            # Auto-detect divergence
+            diverged = False
+            diverged_reason = None
+            case_params_path = Path(sim.case_dir) / "case_params.json"
+            params_for_div = json.loads(case_params_path.read_text()) if case_params_path.exists() else (sim.parameters or {})
+            end_time = params_for_div.get("end_time", 1000)
+            last_time = float(df["Time"].iloc[-1])
+            if last_time < end_time * 0.95:
+                diverged = True
+                diverged_reason = f"stopped at step {int(last_time)}/{end_time}"
+            elif any(abs(float(avg.get(c, 0) or 0)) > 100 for c in ("Cx", "Cz", "Cy") if c in avg.index):
+                diverged = True
+                diverged_reason = "coefficient overflow (diverged values)"
+
             points.append({
                 "sim_id": sim.id,
                 "sim_name": sim.name,
@@ -146,6 +161,8 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
                 "Cz": round(float(avg["Cz"]), 4),
                 "Cy": round(float(avg["Cy"]), 4) if "Cy" in avg.index else None,
                 "CmYaw": round(float(avg["CmYaw"]), 4) if "CmYaw" in avg.index else None,
+                "diverged": diverged,
+                "diverged_reason": diverged_reason,
             })
             case_params_file = Path(sim.case_dir) / "case_params.json"
             if case_params_file.exists():
@@ -183,10 +200,63 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: int, current_user: CurrentUser, db: DB):
-    result = await db.execute(select(Project).where(Project.id == project_id))
+    import shutil, threading
+    from sqlalchemy.orm import selectinload as _sil
+    from backend.cluster import get_runner
+    from backend.cluster.cluster_runner import ClusterRunner, _ssh
+
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+        .options(_sil(Project.geometries).selectinload(Geometry.simulations))
+    )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     _assert_owner_or_admin(project, current_user)
+
+    # Collect active job IDs, case dirs, and uploaded files before deleting DB records
+    from backend.db.models import SimulationStatus
+    active_job_ids = [
+        s.job_id
+        for geo in project.geometries
+        for s in geo.simulations
+        if s.job_id and s.status in (SimulationStatus.running, SimulationStatus.meshing)
+    ]
+    case_dirs = [
+        Path(s.case_dir)
+        for geo in project.geometries
+        for s in geo.simulations
+        if s.case_dir
+    ]
+    upload_paths = [
+        Path(p)
+        for geo in project.geometries
+        for p in (geo.cad_file_path, geo.stl_file_path)
+        if p
+    ]
+
     await db.delete(project)
     await db.commit()
+
+    # Delete local case directories
+    for case_dir in case_dirs:
+        if case_dir.exists():
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+    # Cancel running cluster jobs, then delete remote dirs (fire-and-forget)
+    runner = get_runner()
+    if isinstance(runner, ClusterRunner):
+        def _cleanup():
+            for job_id in active_job_ids:
+                try:
+                    _ssh(f"qdel {job_id} 2>/dev/null || true")
+                except Exception:
+                    pass
+            if case_dirs:
+                rm_cmd = "rm -rf " + " ".join(runner._remote_dir(d) for d in case_dirs)
+                _ssh(rm_cmd)
+        threading.Thread(target=_cleanup, daemon=True).start()
+
+    # Delete uploaded CAD/STL files
+    for p in upload_paths:
+        p.unlink(missing_ok=True)

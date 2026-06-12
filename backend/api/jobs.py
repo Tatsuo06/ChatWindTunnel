@@ -10,11 +10,16 @@ from sqlalchemy.orm import selectinload
 from backend.api.deps import DB, CurrentUser
 from backend.cluster import get_runner
 from backend.cluster.cluster_runner import ClusterRunner
+from backend.cluster.local_runner import LocalRunner, local_foam_available
 from backend.core.config import settings
 from backend.db.models import Geometry, Simulation, SimulationStatus, SimulatorType, UserRole
 from backend.foam.case_builder import build_case, build_restart_case
 
 router = APIRouter(prefix="/simulations/{sim_id}/job", tags=["jobs"])
+
+
+class SubmitRequest(BaseModel):
+    runner_type: str = "auto"  # "auto" | "local" | "cluster"
 
 
 class JobStatusResponse(BaseModel):
@@ -36,7 +41,7 @@ async def _get_sim_with_geo(sim_id: int, db) -> Simulation:
 
 
 @router.post("/submit", response_model=JobStatusResponse)
-async def submit_job(sim_id: int, current_user: CurrentUser, db: DB):
+async def submit_job(sim_id: int, body: SubmitRequest, current_user: CurrentUser, db: DB):
     sim = await _get_sim_with_geo(sim_id, db)
     if current_user.role != UserRole.admin and sim.geometry.project.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
@@ -45,12 +50,18 @@ async def submit_job(sim_id: int, current_user: CurrentUser, db: DB):
     if not sim.geometry.stl_file_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No STL uploaded")
 
-    runner = get_runner()
-    n_processors = (
-        settings.CLUSTER_N_PROCESSORS
-        if isinstance(runner, ClusterRunner)
-        else int(sim.parameters.get("n_processors", 6))
-    )
+    if body.runner_type == "local":
+        runner = LocalRunner()
+    elif body.runner_type == "cluster":
+        runner = ClusterRunner()
+    else:
+        runner = get_runner()
+
+    import os
+    if isinstance(runner, ClusterRunner):
+        n_processors = settings.CLUSTER_N_PROCESSORS
+    else:
+        n_processors = min(int(sim.parameters.get("n_processors", 6)), os.cpu_count() or 6)
     case_dir = build_case(
         sim_id=sim.id,
         stl_path=Path(sim.geometry.stl_file_path),
@@ -181,11 +192,11 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
     build_restart_case(Path(sim.case_dir), body.new_end_time)
 
     runner = get_runner()
-    n_processors = (
-        settings.CLUSTER_N_PROCESSORS
-        if isinstance(runner, ClusterRunner)
-        else int(sim.parameters.get("n_processors", 6))
-    )
+    if isinstance(runner, ClusterRunner):
+        n_processors = settings.CLUSTER_N_PROCESSORS
+    else:
+        import os
+        n_processors = min(int(sim.parameters.get("n_processors", 6)), os.cpu_count() or 6)
     job_id = runner.submit(
         case_dir=Path(sim.case_dir),
         n_processors=n_processors,

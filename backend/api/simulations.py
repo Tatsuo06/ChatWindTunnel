@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status
@@ -75,7 +75,7 @@ class SimulationResponse(BaseModel):
     pitch_deg: float
     roll_deg: float
     parameters: dict
-    job_id: str
+    job_id: str | None = None
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -98,6 +98,177 @@ async def _get_sim(sim_id: int, db) -> Simulation:
 def _assert_access(sim: Simulation, user):
     if user.role != UserRole.admin and sim.geometry.project.owner_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+
+
+_SYNC_STATUS_MAP = {
+    "PENDING": SimulationStatus.meshing,
+    "RUNNING": SimulationStatus.running,
+    "DONE": SimulationStatus.done,
+    "FAILED": SimulationStatus.failed,
+}
+
+
+@router.get("/active-jobs", tags=["jobs"])
+async def list_active_jobs(current_user: CurrentUser, db: DB):
+    """Return all RUNNING/MESHING simulations with enough info for the sync UI."""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    result = await db.execute(
+        select(Simulation)
+        .options(selectinload(Simulation.geometry).selectinload(Geometry.project))
+        .where(Simulation.status.in_([SimulationStatus.running, SimulationStatus.meshing]))
+    )
+    sims = result.scalars().all()
+    return [
+        {
+            "sim_id": s.id,
+            "name": s.name,
+            "project": s.geometry.project.name,
+            "geometry": s.geometry.name,
+            "status": s.status.value,
+            "job_id": s.job_id,
+        }
+        for s in sims
+    ]
+
+
+@router.post("/{sim_id}/sync-one", tags=["jobs"])
+async def sync_one_job(sim_id: int, current_user: CurrentUser, db: DB):
+    """Sync a single simulation with the cluster. Returns a result dict."""
+    import asyncio
+    from backend.cluster import get_runner
+    from backend.cluster.cluster_runner import ClusterRunner
+
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    runner = get_runner()
+    if not isinstance(runner, ClusterRunner):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cluster runner not configured")
+
+    result = await db.execute(
+        select(Simulation)
+        .options(selectinload(Simulation.geometry).selectinload(Geometry.project))
+        .where(Simulation.id == sim_id)
+    )
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Simulation not found")
+
+    if not sim.job_id:
+        return {"sim_id": sim_id, "result": "skipped", "reason": "no job_id"}
+
+    try:
+        raw = runner.status(sim.job_id)
+        new_status = _SYNC_STATUS_MAP.get(raw, SimulationStatus.running)
+
+        if new_status == SimulationStatus.done and sim.case_dir:
+            from backend.cluster.cluster_runner import _ssh as _cluster_ssh
+            remote_dir = runner._remote_dir(Path(sim.case_dir))
+            solver_log = "log.simpleFoam" if sim.solver_type == SimulatorType.steady else "log.pisoFoam"
+            check_out, _ = _cluster_ssh(f"test -f {remote_dir}/{solver_log} && echo yes || echo no")
+            if check_out.strip() != "yes":
+                return {"sim_id": sim_id, "result": "error",
+                        "reason": f"qstat=DONE but {solver_log} missing on cluster"}
+
+        if new_status != sim.status:
+            old_status = sim.status.value
+            sim.status = new_status
+            if new_status in (SimulationStatus.done, SimulationStatus.failed):
+                sim.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+            if new_status == SimulationStatus.done and sim.case_dir:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, runner.fetch_results, sim.job_id, Path(sim.case_dir)
+                )
+            return {
+                "sim_id": sim_id, "result": "updated",
+                "name": sim.name,
+                "project": sim.geometry.project.name,
+                "geometry": sim.geometry.name,
+                "old_status": old_status,
+                "new_status": new_status.value,
+            }
+        return {"sim_id": sim_id, "result": "no_change", "status": new_status.value}
+
+    except Exception as exc:
+        return {"sim_id": sim_id, "result": "error", "reason": str(exc)}
+
+
+@router.post("/sync-cluster", tags=["jobs"])
+async def sync_cluster_jobs(current_user: CurrentUser, db: DB):
+    """Admin: poll cluster for all running/meshing jobs and update DB + fetch results."""
+    import asyncio
+    from backend.cluster import get_runner
+    from backend.cluster.cluster_runner import ClusterRunner
+
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    runner = get_runner()
+    if not isinstance(runner, ClusterRunner):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cluster runner not configured")
+
+    result = await db.execute(
+        select(Simulation)
+        .options(selectinload(Simulation.geometry).selectinload(Geometry.project))
+        .where(Simulation.status.in_([SimulationStatus.running, SimulationStatus.meshing]))
+    )
+    sims = result.scalars().all()
+
+    updated = []
+    errors = []
+    for sim in sims:
+        if not sim.job_id:
+            continue
+        try:
+            raw = runner.status(sim.job_id)
+            new_status = _SYNC_STATUS_MAP.get(raw, SimulationStatus.running)
+
+            if new_status == SimulationStatus.done and sim.case_dir:
+                from backend.cluster.cluster_runner import _ssh as _cluster_ssh
+                remote_dir = runner._remote_dir(Path(sim.case_dir))
+                solver_log = "log.simpleFoam" if sim.solver_type == SimulatorType.steady else "log.pisoFoam"
+                check_out, _ = _cluster_ssh(f"test -f {remote_dir}/{solver_log} && echo yes || echo no")
+                if check_out.strip() != "yes":
+                    errors.append({"sim_id": sim.id, "error": f"qstat=DONE but {solver_log} missing on cluster — skipped"})
+                    continue
+
+            if new_status != sim.status:
+                old_status = sim.status
+                sim.status = new_status
+                if new_status in (SimulationStatus.done, SimulationStatus.failed):
+                    sim.finished_at = datetime.now(timezone.utc)
+                await db.commit()
+                updated.append({
+                    "sim_id": sim.id,
+                    "name": sim.name,
+                    "project": sim.geometry.project.name,
+                    "geometry": sim.geometry.name,
+                    "old_status": old_status.value,
+                    "new_status": new_status.value,
+                })
+                if new_status == SimulationStatus.done and sim.case_dir:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None, runner.fetch_results, sim.job_id, Path(sim.case_dir)
+                    )
+        except Exception as exc:
+            errors.append({"sim_id": sim.id, "error": str(exc)})
+
+    return {"checked": len(sims), "updated": updated, "errors": errors}
+
+
+@router.get("/runner-info")
+async def runner_info(current_user: CurrentUser):
+    """Return which runners are available."""
+    from backend.cluster.local_runner import local_foam_available
+    return {
+        "cluster_available": bool(settings.CLUSTER_HOST),
+        "local_available": local_foam_available(),
+    }
 
 
 @router.get("/status-summary")
@@ -226,7 +397,26 @@ async def update_simulation(sim_id: int, body: SimulationUpdate, current_user: C
 
 @router.delete("/{sim_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_simulation(sim_id: int, current_user: CurrentUser, db: DB):
+    import asyncio, shutil
+    from backend.cluster import get_runner
+    from backend.cluster.cluster_runner import ClusterRunner
+
     sim = await _get_sim(sim_id, db)
     _assert_access(sim, current_user)
+
+    case_dir = Path(sim.case_dir) if sim.case_dir else None
+
     await db.delete(sim)
     await db.commit()
+
+    # Delete local case directory
+    if case_dir and case_dir.exists():
+        shutil.rmtree(case_dir, ignore_errors=True)
+
+    # Delete cluster case directory (fire-and-forget background thread)
+    runner = get_runner()
+    if isinstance(runner, ClusterRunner) and case_dir:
+        from backend.cluster.cluster_runner import _ssh
+        import threading
+        remote_dir = runner._remote_dir(case_dir)
+        threading.Thread(target=_ssh, args=(f"rm -rf {remote_dir}",), daemon=True).start()

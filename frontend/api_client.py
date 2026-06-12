@@ -69,8 +69,11 @@ def create_project(name: str, description: str) -> dict | None:
     return r.json() if r.ok else None
 
 
-def rename_project(project_id: int, name: str) -> dict | None:
-    r = _patch(f"/projects/{project_id}", json={"name": name})
+def rename_project(project_id: int, name: str, description: str | None = None) -> dict | None:
+    body = {"name": name}
+    if description is not None:
+        body["description"] = description
+    r = _patch(f"/projects/{project_id}", json=body)
     return r.json() if r.ok else None
 
 
@@ -122,8 +125,10 @@ def delete_geometry(geo_id: int) -> bool:
     return _delete(f"/geometries/{geo_id}").status_code == 204
 
 
-def upload_cad(geo_id: int, file_bytes: bytes, filename: str, scale: float = 1.0) -> dict | None:
-    r = _post(f"/geometries/{geo_id}/upload-cad", files={"file": (filename, file_bytes)}, params={"scale": scale})
+def upload_cad(geo_id: int, file_bytes: bytes, filename: str, scale: float = 1.0,
+               yaw: float = 0.0, pitch: float = 0.0, roll: float = 0.0) -> dict | None:
+    params = {"scale": scale, "yaw": yaw, "pitch": pitch, "roll": roll}
+    r = _post(f"/geometries/{geo_id}/upload-cad", files={"file": (filename, file_bytes)}, params=params)
     return r.json() if r.ok else None
 
 
@@ -136,6 +141,16 @@ def scale_geometry(geo_id: int, factor: float) -> dict | None:
 def get_status_summary() -> dict:
     r = _get("/simulations/status-summary")
     return r.json() if r.ok else {}
+
+
+def get_active_jobs() -> list[dict]:
+    r = _get("/simulations/active-jobs")
+    return r.json() if r.ok else []
+
+
+def sync_one_job(sim_id: int) -> dict:
+    r = _post(f"/simulations/{sim_id}/sync-one")
+    return r.json() if r.ok else {"sim_id": sim_id, "result": "error", "reason": f"HTTP {r.status_code}"}
 
 
 def list_simulations(geo_id: int) -> list[dict]:
@@ -163,8 +178,18 @@ def delete_simulation(sim_id: int) -> bool:
 
 
 # --- Jobs ---
-def submit_job(sim_id: int) -> dict | None:
-    r = _post(f"/simulations/{sim_id}/job/submit")
+def sync_cluster_jobs() -> dict | None:
+    r = _post("/simulations/sync-cluster")
+    return r.json() if r.ok else None
+
+
+def get_runner_info() -> dict:
+    r = _get("/simulations/runner-info")
+    return r.json() if r and r.ok else {"cluster_available": False, "local_available": False}
+
+
+def submit_job(sim_id: int, runner_type: str = "auto") -> dict | None:
+    r = _post(f"/simulations/{sim_id}/job/submit", json={"runner_type": runner_type})
     return r.json() if r.ok else None
 
 
@@ -204,6 +229,21 @@ def get_geometry_preview(sim_id: int) -> bytes | None:
     return r.content if r.ok else None
 
 
+def get_geometry_3d_data(sim_id: int) -> dict | None:
+    r = _get(f"/simulations/{sim_id}/results/geometry-3d-data")
+    return r.json() if r.ok else None
+
+
+def get_geometry_preview_by_geo(geo_id: int) -> bytes | None:
+    r = _get(f"/geometries/{geo_id}/preview")
+    return r.content if r.ok else None
+
+
+def get_geometry_domain_params(geo_id: int) -> dict | None:
+    r = _get(f"/geometries/{geo_id}/domain-params")
+    return r.json() if r.ok else None
+
+
 def get_residuals_plot(sim_id: int) -> bytes | None:
     r = _get(f"/simulations/{sim_id}/results/residuals")
     return r.content if r.ok else None
@@ -241,4 +281,9 @@ def get_streamlines_plot(sim_id: int) -> bytes | None:
 
 def get_streamlines_paths(sim_id: int) -> dict | None:
     r = _get(f"/simulations/{sim_id}/results/streamlines-paths")
+    return r.json() if r.ok else None
+
+
+def get_wall_streamlines_paths(sim_id: int) -> dict | None:
+    r = _get(f"/simulations/{sim_id}/results/wall-streamlines-paths")
     return r.json() if r.ok else None

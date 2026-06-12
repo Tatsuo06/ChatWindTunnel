@@ -83,7 +83,7 @@ _ALLRUN_STEADY = textwrap.dedent("""\
 
     runApplication reconstructPar -latestTime
 
-    runApplication foamToVTK -noInternal -latestTime -fields '()'
+    runApplication foamToVTK -no-internal -latestTime -fields '()'
 """)
 
 _ALLRUN_LES = textwrap.dedent("""\
@@ -476,7 +476,7 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
     # ---- forceCoeffs reference values ----
     aref = round(W * H, 4)
     lref = round(L, 4)
-    cofr = [round(cx, 4), round((y0 + y1) / 2, 4), round((z0 + z1) / 2, 4)]
+    cofr = [round((x0 + x1) / 2, 4), round((y0 + y1) / 2, 4), round((z0 + z1) / 2, 4)]
 
     return {
         "domain_scale": 1,
@@ -813,6 +813,7 @@ def _apply_laminar(case_dir: Path) -> None:
     fvsol = re.sub(r"[ \t]*k\s+[0-9.]+;\n", "", fvsol)
     fvsol = re.sub(r"[ \t]*omega\s+[0-9.]+;\n", "", fvsol)
     fvsol_path.write_text(fvsol)
+
 
 
 def _write_block_mesh_dict(case_dir: Path, params: dict) -> None:
