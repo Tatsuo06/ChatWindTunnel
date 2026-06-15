@@ -119,10 +119,17 @@ if not geo_id:
 st.title(f"🌬️ {t('cases_title')} — {st.session_state.get('geo_name', '')}")
 
 
+def _llm_model_name() -> str:
+    if "llm_model_name" not in st.session_state:
+        s = api.get_llm_settings()
+        st.session_state["llm_model_name"] = s["model"] if s else "?"
+    return st.session_state["llm_model_name"]
+
+
 def _chat_section(sim_id: int, chat_key: str, heading: str, caption: str, placeholder: str):
     st.divider()
     st.markdown(f"#### 💬 {heading}")
-    st.caption(caption)
+    st.caption(f"{caption}  \n`{_llm_model_name()}`")
     history = api.get_chat_history(sim_id)
     container = st.container(height=280)
     with container:

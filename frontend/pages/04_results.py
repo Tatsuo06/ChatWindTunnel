@@ -498,7 +498,9 @@ for geo in data:
 # ── Project-level chat ──────────────────────────────────────────
 st.divider()
 st.markdown(f"#### 💬 {t('summary_chat_heading')}")
-st.caption(t("summary_chat_caption"))
+_llm = api.get_llm_settings()
+_model_name = _llm["model"] if _llm else "?"
+st.caption(f"{t('summary_chat_caption')}  \n`{_model_name}`")
 
 chat_history_key = f"summary_chat_history_{project_id}"
 if chat_history_key not in st.session_state:
