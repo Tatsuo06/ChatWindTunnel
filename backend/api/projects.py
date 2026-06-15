@@ -1,3 +1,5 @@
+import json
+import math
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status
@@ -7,8 +9,6 @@ from sqlalchemy.orm import selectinload
 
 from backend.api.deps import DB, AdminUser, CurrentUser
 from backend.db.models import Geometry, Project, Simulation, SimulationStatus, UserRole
-import json
-
 from backend.visualization.parsers import parse_force_coefficients
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -196,6 +196,126 @@ async def cd_cl_summary(project_id: int, current_user: CurrentUser, db: DB):
             })
 
     return out
+
+
+class ProjectChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+class ProjectChatResponse(BaseModel):
+    reply: str
+
+
+@router.post("/{project_id}/chat", response_model=ProjectChatResponse)
+async def project_chat(project_id: int, body: ProjectChatRequest, current_user: CurrentUser, db: DB):
+    """Stateless LLM chat with project-level result summary as context. History is managed client-side."""
+    from litellm import acompletion
+    from backend.core.config import settings
+
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    _assert_owner_or_admin(project, current_user)
+
+    # Build summary context from all done simulations
+    geos_result = await db.execute(
+        select(Geometry)
+        .where(Geometry.project_id == project_id)
+        .options(selectinload(Geometry.simulations))
+    )
+    geos = geos_result.scalars().all()
+
+    summary_lines = [f"Project: {project.name}"]
+    for geo in geos:
+        geo_lines = []
+        for sim in geo.simulations:
+            if sim.status != SimulationStatus.done or not sim.case_dir:
+                continue
+            df = parse_force_coefficients(Path(sim.case_dir))
+            if df.empty:
+                continue
+            tail = df.iloc[max(0, int(len(df) * 0.8)):]
+            avg = tail.mean(numeric_only=True)
+
+            # Body-frame conversion
+            cx = round(float(avg.get("Cx", 0)), 4)
+            cy = round(float(avg.get("Cy", 0)), 4) if "Cy" in avg.index else None
+            cz = round(float(avg.get("Cz", 0)), 4) if "Cz" in avg.index else None
+            yaw = sim.yaw_deg or 0.0
+            psi = math.radians(yaw)
+            bx = round(-(cx * math.cos(psi) - (cy or 0) * math.sin(psi)), 4)
+
+            case_params_path = Path(sim.case_dir) / "case_params.json"
+            p = json.loads(case_params_path.read_text()) if case_params_path.exists() else (sim.parameters or {})
+            u = p.get("velocity_mps", "?")
+            aref = p.get("aref", "?")
+            lref = p.get("lref", "?")
+
+            line = (
+                f"  Case {sim.name}: yaw={yaw}°, pitch={sim.pitch_deg}°, roll={sim.roll_deg or 0}°"
+                f" | U={u}m/s, Aref={aref}m², Lref={lref}m"
+                f" | Cx={cx}, Cz={cz}, Cy={cy}"
+                f" | Cx(body)={bx}"
+            )
+            geo_lines.append(line)
+
+        if geo_lines:
+            summary_lines.append(f"Geometry: {geo.name}")
+            summary_lines.extend(geo_lines)
+
+    context = "\n".join(summary_lines) if len(summary_lines) > 1 else "No completed simulations found."
+
+    system_prompt = f"""\
+You are a CFD wind tunnel results analyst for the ChatWindTunnel system.
+You help users understand and interpret their simulation results.
+The following is a summary of all completed simulation results for this project:
+
+{context}
+
+Coefficient definitions:
+- Cx: drag coefficient in wind axis (flow direction +X). Positive = drag.
+- Cz: lift coefficient in wind axis (vertical +Z). Positive = upforce (lift).
+- Cy: side force coefficient in wind axis (+Y lateral).
+- Cx(body): drag coefficient in body-fixed frame (forward direction of the vehicle).
+- Yaw angle: angle between wind direction and vehicle heading. Positive = wind from left.
+
+When asked about "drag", refer to Cx or Cx(body) as appropriate.
+When asked about "lift", refer to Cz.
+Be concise and specific. Reference actual values from the data above.
+Respond in the same language as the user.
+STRICT OUTPUT RULES: Start your reply directly with the answer. Do not start with "The user is asking", "I need to", or any internal analysis. Just answer.
+"""
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(body.history)
+    messages.append({"role": "user", "content": body.message})
+
+    response = await acompletion(
+        model=f"openai/{settings.LLM_MODEL}",
+        api_base=settings.LLM_BASE_URL,
+        api_key=settings.LLM_API_KEY,
+        messages=messages,
+        temperature=0.3,
+        extra_body={"reasoning_effort": "none"},
+    )
+    reply = response.choices[0].message.content or ""
+    # Strip thinking-model preamble (lines starting with internal reasoning phrases)
+    if reply:
+        lines = reply.splitlines()
+        skip_prefixes = (
+            "the user is asking", "the user wants",
+            "i need to", "i have to", "i will ", "i'll ",
+            "let me ", "first, ", "okay, ", "alright, ", "sure, ",
+            "to answer", "looking at", "from the data,",
+        )
+        while lines and lines[0].strip().lower().startswith(skip_prefixes):
+            lines.pop(0)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        reply = "\n".join(lines)
+    return ProjectChatResponse(reply=reply)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)

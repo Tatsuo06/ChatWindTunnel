@@ -223,6 +223,11 @@ def get_chat_history(sim_id: int) -> list[dict]:
     return r.json() if r.ok else []
 
 
+def send_project_chat(project_id: int, message: str, history: list[dict]) -> dict | None:
+    r = _post(f"/projects/{project_id}/chat", json={"message": message, "history": history})
+    return r.json() if r.ok else None
+
+
 # --- Results (PNG bytes) ---
 def get_geometry_preview(sim_id: int) -> bytes | None:
     r = _get(f"/simulations/{sim_id}/results/geometry")

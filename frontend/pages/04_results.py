@@ -455,6 +455,7 @@ if all_bx:
 
 # ── Data table ─────────────────────────────────────────────────
 st.subheader(t("numerical_data"))
+
 for geo in data:
     st.markdown(f"**{geo['geo_name']}**")
     rp = geo.get("ref_params") or {}
@@ -493,3 +494,36 @@ for geo in data:
             "Cx(b)": bx, "Cy(b)": by, "Cz(b)": bz, "CmYaw(b)": bmz,
         })
     st.dataframe(rows, use_container_width=True, hide_index=True)
+
+# ── Project-level chat ──────────────────────────────────────────
+st.divider()
+st.markdown(f"#### 💬 {t('summary_chat_heading')}")
+st.caption(t("summary_chat_caption"))
+
+chat_history_key = f"summary_chat_history_{project_id}"
+if chat_history_key not in st.session_state:
+    st.session_state[chat_history_key] = []
+
+chat_container = st.container(height=300)
+with chat_container:
+    for msg in st.session_state[chat_history_key]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+user_input = st.chat_input(t("summary_chat_placeholder"), key="summary_chat_input")
+if user_input:
+    with chat_container:
+        with st.chat_message("user"):
+            st.markdown(user_input)
+    with st.spinner("Processing..."):
+        result = api.send_project_chat(project_id, user_input, st.session_state[chat_history_key])
+    if result:
+        reply = result["reply"]
+        st.session_state[chat_history_key].append({"role": "user", "content": user_input})
+        st.session_state[chat_history_key].append({"role": "assistant", "content": reply})
+        with chat_container:
+            with st.chat_message("assistant"):
+                st.markdown(reply)
+        st.rerun()
+    else:
+        st.error("Chat failed. Check that LM Studio is running.")

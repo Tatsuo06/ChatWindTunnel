@@ -180,6 +180,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "chat_results_heading": "Ask about results",
         "chat_results_caption": "e.g. \"Is the Cx value reasonable?\" / \"Has it converged?\" / \"Explain the effect of yaw angle.\"",
         "chat_results_placeholder": "Ask a question about the results",
+        "summary_chat_heading": "Ask about summary results",
+        "summary_chat_caption": "e.g. \"Which geometry has the lowest drag?\" / \"How does yaw angle affect Cx?\" / \"Compare geometries.\"",
+        "summary_chat_placeholder": "Ask a question about the project results",
         "rename_btn": "✏️ Rename",
         "delete_btn": "🗑 Delete",
 
@@ -404,6 +407,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "chat_results_heading": "結果について質問",
         "chat_results_caption": "例: 「Cxの値は妥当ですか？」「収束できていますか？」「ヨー角の影響を説明して」",
         "chat_results_placeholder": "結果に関する質問を入力",
+        "summary_chat_heading": "サマリー結果について質問",
+        "summary_chat_caption": "例: 「最もCxが低いジオメトリはどれですか？」「ヨー角がCxに与える影響は？」「ジオメトリを比較して」",
+        "summary_chat_placeholder": "プロジェクト結果に関する質問を入力",
         "rename_btn": "✏️ 名前変更",
         "delete_btn": "🗑 削除",
 
