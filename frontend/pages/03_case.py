@@ -395,7 +395,7 @@ with right:
         params = sim.get("parameters", {})
         _AUTO_DOMAIN_KEYS = {
             "domain_scale", "domain_xmin", "domain_xmax",
-            "domain_yhalf", "domain_zmax",
+            "domain_yhalf", "domain_zmin", "domain_zmax",
             "blockmesh_nx", "blockmesh_ny", "blockmesh_nz",
             "refbox_min", "refbox_max", "location_in_mesh",
             "auto_domain",

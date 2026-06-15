@@ -168,6 +168,8 @@ refbox_max = [x1_rot + pad,  y1_rot + pad,  z1_rot + pad]
 
 Implemented in `case_builder._refbox_from_rotated_stl()`. Called in `build_case()` after STL rotation, and in `results.py` geometry preview endpoint. This ensures the refinement region always tightly follows the actual rotated geometry orientation.
 
+**insideSurfaces is always set in snappyHexMeshDict**: Both templates (`motorBike/system/snappyHexMeshDict` and `motorBike_LES/motorBike/system/snappyHexMeshDict`) include `insideSurfaces (motorBike);` in `castellatedMeshControls`. This explicitly removes cells inside the geometry surface during the castellated mesh phase. Unlike `locationInMesh` (which keeps cells reachable from the seed point), `insideSurfaces` works even for open/non-watertight STLs — it uses surface intersection tests rather than flood fill. This is required for geometries like ship hulls (e.g. JBC) that have open edges, where snappyHexMesh would otherwise mesh the interior of the hull. Cases built before Case #145 do not have this setting.
+
 **LLM abstraction via LiteLLM**: `backend/chat/agent.py` calls LiteLLM with `model="openai/<model>"` and `api_base` pointing to LM Studio. To switch to Claude or OpenAI, only `.env` values change — no code changes needed.
 
 **Job runner factory**: `cluster/__init__.py:get_runner()` returns `LocalRunner` when `CLUSTER_USER` is empty, `ClusterRunner` otherwise. Local runner uses background threads; cluster runner SSHes to the host set in `CLUSTER_HOST` and submits PBS jobs with `qsub`.

@@ -298,7 +298,7 @@ async def geometry_domain_params(geo_id: int, current_user: CurrentUser, db: DB)
             "xmax": domain["domain_xmax"] * s,
             "ymin": -domain["domain_yhalf"] * s,
             "ymax":  domain["domain_yhalf"] * s,
-            "zmin": 0.0,
+            "zmin": domain["domain_zmin"] * s,
             "zmax": domain["domain_zmax"] * s,
         },
         "refbox": {

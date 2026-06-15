@@ -76,12 +76,17 @@ async def geometry_preview(sim_id: int, current_user: CurrentUser, db: DB):
         stl_path = Path(sim.geometry.stl_file_path)
         label = "ヨー: 0°  ピッチ: 0°  ロール: 0°（回転なし）"
 
-    # Domain params: from case_params.json if available, else from pre-rotation STL
+    # Domain params: always recompute zmin/zmax from STL (case_params.json may predate the fix)
     original_stl = Path(sim.geometry.stl_file_path)
-    if domain is None:
-        try:
-            domain = _auto_domain_params(original_stl)
-        except Exception:
+    try:
+        auto = _auto_domain_params(original_stl)
+        if domain is None:
+            domain = auto
+        else:
+            domain["domain_zmin"] = auto["domain_zmin"]
+            domain["domain_zmax"] = auto["domain_zmax"]
+    except Exception:
+        if domain is None:
             domain = None
 
     # RefinementBox: always from rotated STL bounding box + 20% margin
@@ -138,7 +143,7 @@ async def geometry_3d_data(sim_id: int, current_user: CurrentUser, db: DB):
             "xmax": domain["domain_xmax"] * s,
             "ymin": -domain["domain_yhalf"] * s,
             "ymax":  domain["domain_yhalf"] * s,
-            "zmin": 0.0,
+            "zmin": domain["domain_zmin"] * s,
             "zmax": domain["domain_zmax"] * s,
         },
         "refbox": {

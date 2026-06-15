@@ -342,10 +342,10 @@ scale   {scale};
 
 vertices
 (
-    ({xmin} {ymin}  0)
-    ({xmax} {ymin}  0)
-    ({xmax}  {ymax}  0)
-    ({xmin}  {ymax}  0)
+    ({xmin} {ymin}  {zmin})
+    ({xmax} {ymin}  {zmin})
+    ({xmax}  {ymax}  {zmin})
+    ({xmin}  {ymax}  {zmin})
     ({xmin} {ymin}  {zmax})
     ({xmax} {ymin}  {zmax})
     ({xmax}  {ymax}  {zmax})
@@ -459,19 +459,21 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
     dom_xmin  = round(cx - 2.0 * L, 2)
     dom_xmax  = round(cx + 4.0 * L, 2)
     dom_yhalf = round(2.5 * L, 2)
-    dom_zmax  = round(2.5 * L, 2)
+    dom_zmin  = round(z0, 4)            # ground plane = STL z_min (body sits on floor)
+    dom_zmax  = round(z0 + 2.5 * L, 2) # absolute top; span (2.5L) unchanged
 
-    Lx = dom_xmax - dom_xmin
+    Lx   = dom_xmax - dom_xmin
+    Lz   = dom_zmax - dom_zmin          # = 2.5L
     ny = max(8, round(nx * 2 * dom_yhalf / Lx))
-    nz = max(8, round(nx * dom_zmax       / Lx))
+    nz = max(8, round(nx * Lz           / Lx))
 
     # ---- snappyHexMesh refinement box (pre-rotation fallback only) ----
     ref_y = round(0.8 * L, 2)
-    refbox_min = [round(x0 - 0.3 * L, 2), -ref_y, 0.0]
+    refbox_min = [round(x0 - 0.3 * L, 2), -ref_y, dom_zmin]
     refbox_max = [round(x1 + 0.7 * L, 2),  ref_y, round(z1 + H, 2)]
 
     # ---- seed point: upstream of body, on centreline, mid-domain height ----
-    loc = [round((dom_xmin + x0) / 2, 2), 0.0, round(dom_zmax / 2, 2)]
+    loc = [round((dom_xmin + x0) / 2, 2), 0.0, round((dom_zmin + dom_zmax) / 2, 2)]
 
     # ---- forceCoeffs reference values ----
     aref = round(W * H, 4)
@@ -483,6 +485,7 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
         "domain_xmin":  dom_xmin,
         "domain_xmax":  dom_xmax,
         "domain_yhalf": dom_yhalf,
+        "domain_zmin":  dom_zmin,
         "domain_zmax":  dom_zmax,
         "blockmesh_nx": nx,
         "blockmesh_ny": ny,
@@ -521,7 +524,7 @@ def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
     refbox_min = [
         round(x0 - pad, 3),
         round(y0 - pad, 3),
-        max(0.0, round(z0 - pad, 3)),
+        round(z0, 4),  # refbox floor = geometry bottom = domain floor (no padding below)
     ]
     refbox_max = [
         round(x1 + pad, 3),
@@ -821,6 +824,7 @@ def _write_block_mesh_dict(case_dir: Path, params: dict) -> None:
     xmin   = params.get("domain_xmin",  -5)
     xmax   = params.get("domain_xmax",  15)
     yhalf  = params.get("domain_yhalf",  4)
+    zmin   = params.get("domain_zmin",   0)
     zmax   = params.get("domain_zmax",   8)
     nx     = int(params.get("blockmesh_nx", 20))
     ny     = int(params.get("blockmesh_ny",  8))
@@ -830,7 +834,7 @@ def _write_block_mesh_dict(case_dir: Path, params: dict) -> None:
             scale=scale,
             xmin=xmin, xmax=xmax,
             ymin=-yhalf, ymax=yhalf,
-            zmax=zmax,
+            zmin=zmin, zmax=zmax,
             nx=nx, ny=ny, nz=nz,
         )
     )

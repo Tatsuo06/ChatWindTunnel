@@ -146,6 +146,9 @@ castellatedMeshControls
     // Mesh selection
     // ~~~~~~~~~~~~~~
 
+    // Explicitly remove cells inside these surfaces (works even for open/non-watertight STLs)
+    insideSurfaces (motorBike);
+
     // After refinement patches get added for all refinementSurfaces and
     // all cells intersecting the surfaces get put into these patches. The
     // section reachable from the locationInMesh is kept.

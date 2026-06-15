@@ -25,8 +25,9 @@ class PyVistaBackend(VisualizationBackend):
             xmin  = domain.get("domain_xmin",  -5)
             xmax  = domain.get("domain_xmax",  15)
             yhalf = domain.get("domain_yhalf",  4)
+            zmin  = domain.get("domain_zmin",   0.0)
             zmax  = domain.get("domain_zmax",   8)
-            box = pv.Box(bounds=(xmin, xmax, -yhalf, yhalf, 0.0, zmax))
+            box = pv.Box(bounds=(xmin, xmax, -yhalf, yhalf, zmin, zmax))
             pl.add_mesh(box, style="wireframe", color="orange",
                         line_width=2, opacity=0.9, render_lines_as_tubes=False)
 
@@ -41,7 +42,7 @@ class PyVistaBackend(VisualizationBackend):
         if domain:
             x0l, x1l = domain.get("domain_xmin", -5), domain.get("domain_xmax", 15)
             yhl = domain.get("domain_yhalf", 4)
-            x0l, x1l, y0l, y1l, z0l, z1l = x0l, x1l, -yhl, yhl, 0.0, domain.get("domain_zmax", 8)
+            x0l, x1l, y0l, y1l, z0l, z1l = x0l, x1l, -yhl, yhl, domain.get("domain_zmin", 0.0), domain.get("domain_zmax", 8)
         else:
             b = mesh.bounds  # (xmin, xmax, ymin, ymax, zmin, zmax)
             x0l, x1l, y0l, y1l, z0l, z1l = b[0], b[1], b[2], b[3], b[4], b[5]
