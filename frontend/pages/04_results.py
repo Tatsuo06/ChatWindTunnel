@@ -517,7 +517,7 @@ if user_input:
             st.markdown(user_input)
     with st.spinner("Processing..."):
         result = api.send_project_chat(project_id, user_input, st.session_state[chat_history_key])
-    if result:
+    if result and "error" not in result:
         reply = result["reply"]
         st.session_state[chat_history_key].append({"role": "user", "content": user_input})
         st.session_state[chat_history_key].append({"role": "assistant", "content": reply})
@@ -525,5 +525,7 @@ if user_input:
             with st.chat_message("assistant"):
                 st.markdown(reply)
         st.rerun()
+    elif result and "error" in result:
+        st.error(f"Chat error: {result['error']}")
     else:
-        st.error("Chat failed. Check that LM Studio is running.")
+        st.error(t("chat_llm_unavailable"))

@@ -225,7 +225,13 @@ def get_chat_history(sim_id: int) -> list[dict]:
 
 def send_project_chat(project_id: int, message: str, history: list[dict]) -> dict | None:
     r = _post(f"/projects/{project_id}/chat", json={"message": message, "history": history})
-    return r.json() if r.ok else None
+    if r.ok:
+        return r.json()
+    try:
+        detail = r.json().get("detail", "")
+    except Exception:
+        detail = ""
+    return {"error": detail or f"HTTP {r.status_code}"}
 
 
 # --- Admin: LLM settings ---

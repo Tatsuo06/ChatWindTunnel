@@ -231,6 +231,7 @@ async def project_chat(project_id: int, body: ProjectChatRequest, current_user: 
     summary_lines = [f"Project: {project.name}"]
     for geo in geos:
         geo_lines = []
+        ref_header: str | None = None
         for sim in geo.simulations:
             if sim.status != SimulationStatus.done or not sim.case_dir:
                 continue
@@ -240,7 +241,6 @@ async def project_chat(project_id: int, body: ProjectChatRequest, current_user: 
             tail = df.iloc[max(0, int(len(df) * 0.8)):]
             avg = tail.mean(numeric_only=True)
 
-            # Body-frame conversion
             cx = round(float(avg.get("Cx", 0)), 4)
             cy = round(float(avg.get("Cy", 0)), 4) if "Cy" in avg.index else None
             cz = round(float(avg.get("Cz", 0)), 4) if "Cz" in avg.index else None
@@ -248,22 +248,20 @@ async def project_chat(project_id: int, body: ProjectChatRequest, current_user: 
             psi = math.radians(yaw)
             bx = round(-(cx * math.cos(psi) - (cy or 0) * math.sin(psi)), 4)
 
-            case_params_path = Path(sim.case_dir) / "case_params.json"
-            p = json.loads(case_params_path.read_text()) if case_params_path.exists() else (sim.parameters or {})
-            u = p.get("velocity_mps", "?")
-            aref = p.get("aref", "?")
-            lref = p.get("lref", "?")
+            if ref_header is None:
+                case_params_path = Path(sim.case_dir) / "case_params.json"
+                p = json.loads(case_params_path.read_text()) if case_params_path.exists() else (sim.parameters or {})
+                ref_header = f"  (U={p.get('velocity_mps','?')}m/s, Aref={p.get('aref','?')}m², Lref={p.get('lref','?')}m)"
 
-            line = (
-                f"  Case {sim.name}: yaw={yaw}°, pitch={sim.pitch_deg}°, roll={sim.roll_deg or 0}°"
-                f" | U={u}m/s, Aref={aref}m², Lref={lref}m"
-                f" | Cx={cx}, Cz={cz}, Cy={cy}"
-                f" | Cx(body)={bx}"
-            )
+            # Compact: one line per case — only yaw + coefficients
+            if cy is not None:
+                line = f"  yaw={yaw}°: Cx={cx}, Cz={cz}, Cy={cy}, Cx(b)={bx}"
+            else:
+                line = f"  yaw={yaw}°: Cx={cx}, Cz={cz}, Cx(b)={bx}"
             geo_lines.append(line)
 
         if geo_lines:
-            summary_lines.append(f"Geometry: {geo.name}")
+            summary_lines.append(f"Geometry: {geo.name}{' ' + ref_header if ref_header else ''}")
             summary_lines.extend(geo_lines)
 
     context = "\n".join(summary_lines) if len(summary_lines) > 1 else "No completed simulations found."
@@ -293,14 +291,20 @@ STRICT OUTPUT RULES: Start your reply directly with the answer. Do not start wit
     messages.extend(body.history)
     messages.append({"role": "user", "content": body.message})
 
-    response = await acompletion(
-        model=f"openai/{get_llm_model()}",
-        api_base=get_llm_base_url(),
-        api_key=get_llm_api_key(),
-        messages=messages,
-        temperature=0.3,
-        extra_body={"reasoning_effort": "none"},
-    )
+    try:
+        response = await acompletion(
+            model=f"openai/{get_llm_model()}",
+            api_base=get_llm_base_url(),
+            api_key=get_llm_api_key(),
+            messages=messages,
+            temperature=0.3,
+            extra_body={"reasoning_effort": "none"},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM error: {e}",
+        )
     reply = response.choices[0].message.content or ""
     # Strip thinking-model preamble (lines starting with internal reasoning phrases)
     if reply:
