@@ -9,7 +9,7 @@ from typing import AsyncIterator
 
 from litellm import acompletion
 
-from backend.core.config import settings
+from backend.core.config import settings, get_llm_model, get_llm_base_url, get_llm_api_key
 from backend.visualization.parsers import parse_force_coefficients, parse_mesh_info, parse_residuals, parse_clock_time, parse_peak_memory
 
 SYSTEM_PROMPT = """\
@@ -348,9 +348,9 @@ async def chat(
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
     response = await acompletion(
-        model=f"openai/{settings.LLM_MODEL}",
-        api_base=settings.LLM_BASE_URL,
-        api_key=settings.LLM_API_KEY,
+        model=f"openai/{get_llm_model()}",
+        api_base=get_llm_base_url(),
+        api_key=get_llm_api_key(),
         messages=full_messages,
         tools=TOOLS,
         tool_choice="auto",
@@ -382,9 +382,9 @@ async def chat(
 
         # Second pass: get final assistant reply after tool execution
         follow_up = await acompletion(
-            model=f"openai/{settings.LLM_MODEL}",
-            api_base=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
+            model=f"openai/{get_llm_model()}",
+            api_base=get_llm_base_url(),
+            api_key=get_llm_api_key(),
             messages=full_messages + [message] + tool_results,
             temperature=0.2,
         )

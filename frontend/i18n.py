@@ -228,6 +228,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cluster_sync_no_update": "No status changes detected.",
         "cluster_sync_error": "Sync failed (no cluster configured?).",
         "cluster_sync_errors": "{} job(s) had errors.",
+        "llm_settings": "LLM Settings",
+        "llm_current_model": "Current model",
+        "llm_select_model": "Select model",
+        "llm_model_updated": "Model updated to: {}",
+        "llm_model_fetch_fail": "Could not fetch model list (is LM Studio running?)",
     },
     "ja": {
         # --- common ---
@@ -455,6 +460,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "cluster_sync_no_update": "変化なし（更新対象なし）。",
         "cluster_sync_error": "同期失敗（クラスタ未設定？）。",
         "cluster_sync_errors": "{} 件のジョブでエラーが発生しました。",
+        "llm_settings": "LLM 設定",
+        "llm_current_model": "現在のモデル",
+        "llm_select_model": "モデルを選択",
+        "llm_model_updated": "モデルを変更しました: {}",
+        "llm_model_fetch_fail": "モデル一覧を取得できませんでした（LM Studio は起動中ですか？）",
     },
 }
 

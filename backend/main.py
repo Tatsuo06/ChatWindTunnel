@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import auth, projects, geometries, simulations, chat, jobs, results
+from backend.api import admin, auth, projects, geometries, simulations, chat, jobs, results
 from backend.core.config import settings
 from backend.db.models import Base
 from backend.db.session import engine
@@ -30,6 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(geometries.router)

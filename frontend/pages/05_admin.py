@@ -18,6 +18,27 @@ if user.get("role") != "admin":
 
 st.title(f"⚙️ {t('user_management')}")
 
+# ── LLM Settings ────────────────────────────────────────────────────────────
+st.subheader(t("llm_settings"))
+
+current = api.get_llm_settings()
+current_model = current["model"] if current else "—"
+st.caption(f"{t('llm_current_model')}: **{current_model}**")
+
+models = api.get_llm_models()
+if models:
+    selected = st.selectbox(t("llm_select_model"), options=models,
+                            index=models.index(current_model) if current_model in models else 0)
+    if st.button("✅ Apply", key="apply_llm_model"):
+        result = api.update_llm_model(selected)
+        if result:
+            st.success(t("llm_model_updated", result["model"]))
+            st.rerun()
+else:
+    st.warning(t("llm_model_fetch_fail"))
+
+st.divider()
+
 # ── Cluster job sync ────────────────────────────────────────────────────────
 st.subheader(t("cluster_sync"))
 st.caption(t("cluster_sync_caption"))

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from backend.api.deps import DB, AdminUser, CurrentUser
+from backend.core.config import get_llm_model, get_llm_base_url, get_llm_api_key
 from backend.db.models import Geometry, Project, Simulation, SimulationStatus, UserRole
 from backend.visualization.parsers import parse_force_coefficients
 
@@ -293,9 +294,9 @@ STRICT OUTPUT RULES: Start your reply directly with the answer. Do not start wit
     messages.append({"role": "user", "content": body.message})
 
     response = await acompletion(
-        model=f"openai/{settings.LLM_MODEL}",
-        api_base=settings.LLM_BASE_URL,
-        api_key=settings.LLM_API_KEY,
+        model=f"openai/{get_llm_model()}",
+        api_base=get_llm_base_url(),
+        api_key=get_llm_api_key(),
         messages=messages,
         temperature=0.3,
         extra_body={"reasoning_effort": "none"},

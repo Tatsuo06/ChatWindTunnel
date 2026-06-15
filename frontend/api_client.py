@@ -228,6 +228,22 @@ def send_project_chat(project_id: int, message: str, history: list[dict]) -> dic
     return r.json() if r.ok else None
 
 
+# --- Admin: LLM settings ---
+def get_llm_settings() -> dict | None:
+    r = _get("/admin/llm-settings")
+    return r.json() if r.ok else None
+
+
+def get_llm_models() -> list[str]:
+    r = _get("/admin/llm-models")
+    return r.json() if r.ok else []
+
+
+def update_llm_model(model: str) -> dict | None:
+    r = _patch("/admin/llm-settings", json={"model": model})
+    return r.json() if r.ok else None
+
+
 # --- Results (PNG bytes) ---
 def get_geometry_preview(sim_id: int) -> bytes | None:
     r = _get(f"/simulations/{sim_id}/results/geometry")

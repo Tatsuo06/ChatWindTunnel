@@ -43,3 +43,22 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Runtime overrides (admin UI can update these without restarting the server)
+_runtime: dict = {}
+
+
+def get_llm_model() -> str:
+    return _runtime.get("LLM_MODEL") or settings.LLM_MODEL
+
+
+def get_llm_base_url() -> str:
+    return _runtime.get("LLM_BASE_URL") or settings.LLM_BASE_URL
+
+
+def get_llm_api_key() -> str:
+    return _runtime.get("LLM_API_KEY") or settings.LLM_API_KEY
+
+
+def set_llm_model(model: str) -> None:
+    _runtime["LLM_MODEL"] = model
