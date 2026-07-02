@@ -10,9 +10,13 @@ from typing import AsyncIterator
 from litellm import acompletion
 
 from backend.core.config import settings, get_llm_model, get_llm_base_url, get_llm_api_key
-from backend.visualization.parsers import parse_force_coefficients, parse_mesh_info, parse_residuals, parse_clock_time, parse_peak_memory
+from backend.visualization.parsers import (
+    parse_force_coefficients, parse_mesh_info, parse_residuals,
+    parse_clock_time, parse_peak_memory,
+    parse_solver_diagnostics, parse_mesh_diagnostics,
+)
 
-SYSTEM_PROMPT = """\
+_BASE_SYSTEM_PROMPT = """\
 You are a CFD simulation assistant for the ChatWindTunnel system.
 Your role is to help users configure wind tunnel simulations using OpenFOAM v2206.
 When the user specifies simulation conditions in natural language, call the appropriate tools to set parameters.
@@ -27,6 +31,28 @@ TOOL-USE RULES (mandatory):
 - create cases → MUST call create_simulation (once per case)
 - NEVER claim an action succeeded without first calling the corresponding tool.
 """
+
+
+def _build_system_prompt(case_dir: Path) -> str:
+    """Append mesh and solver diagnostics to system prompt when logs are available."""
+    sections: list[str] = [_BASE_SYSTEM_PROMPT]
+
+    mesh_diag = parse_mesh_diagnostics(case_dir) if case_dir and case_dir.exists() else {}
+    if mesh_diag.get("summary"):
+        sections.append("MESH DIAGNOSTICS (from log.checkMesh):\n" + mesh_diag["summary"])
+
+    solver_diag = parse_solver_diagnostics(case_dir) if case_dir and case_dir.exists() else {}
+    if solver_diag.get("summary"):
+        sections.append("SOLVER DIAGNOSTICS (from solver log):\n" + solver_diag["summary"])
+
+    if mesh_diag or solver_diag:
+        sections.append(
+            "Use the above diagnostics to answer questions about why the simulation diverged or "
+            "whether the mesh or initial conditions are problematic. "
+            "Reference specific values (e.g., 'bounding omega at Time=1, min=-14156') when relevant."
+        )
+
+    return "\n\n".join(sections)
 
 TOOLS = [
     {
@@ -345,7 +371,7 @@ async def chat(
     """Run one chat turn.
     Returns (assistant_reply, updated_params, angle_updates, sim_creations, job_submission, sim_deletions).
     """
-    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    full_messages = [{"role": "system", "content": _build_system_prompt(case_dir)}] + messages
 
     response = await acompletion(
         model=f"openai/{get_llm_model()}",

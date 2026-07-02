@@ -12,6 +12,13 @@ from backend.visualization.parsers import parse_force_coefficients, parse_residu
 # Use offscreen rendering (no display needed on server)
 pv.start_xvfb() if hasattr(pv, "start_xvfb") else None
 
+# Suppress VTK color buffer warnings on macOS Cocoa offscreen context
+try:
+    import vtkmodules.vtkCommonCore as _vtk_core
+    _vtk_core.vtkObject.GlobalWarningDisplayOff()
+except Exception:
+    pass
+
 
 class PyVistaBackend(VisualizationBackend):
 
