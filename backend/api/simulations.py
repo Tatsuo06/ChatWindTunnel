@@ -270,7 +270,7 @@ async def runner_info(current_user: CurrentUser):
     from backend.cluster.local_runner import local_foam_available
     return {
         "cluster_available": bool(settings.CLUSTER_HOST),
-        "local_available": local_foam_available(),
+        "local_available": settings.ALLOW_LOCAL_RUNNER and local_foam_available(),
     }
 
 

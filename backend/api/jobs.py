@@ -51,6 +51,9 @@ async def submit_job(sim_id: int, body: SubmitRequest, current_user: CurrentUser
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No STL uploaded")
 
     if body.runner_type == "local":
+        if not settings.ALLOW_LOCAL_RUNNER:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Local runner is disabled (ALLOW_LOCAL_RUNNER=false)")
         runner = LocalRunner()
     elif body.runner_type == "cluster":
         runner = ClusterRunner()

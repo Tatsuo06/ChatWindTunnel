@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     # OpenFOAM
     FOAM_LOCAL_APP: str = "/Applications/OpenFOAM-v2206.app"
+    # Set false in production to hide/reject the local runner (cluster only)
+    ALLOW_LOCAL_RUNNER: bool = True
 
     # Cluster
     CLUSTER_HOST: str = ""
