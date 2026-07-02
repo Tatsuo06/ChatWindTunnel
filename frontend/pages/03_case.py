@@ -80,7 +80,7 @@ def _show_geometry_3d(data: dict) -> None:
         ),
         paper_bgcolor="rgb(15,15,25)",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
 
 def _show_restart_expander(sim: dict, sim_id: int) -> None:
@@ -96,7 +96,7 @@ def _show_restart_expander(sim: dict, sim_id: int) -> None:
         )
         new_end = current_end + int(add_steps)
         st.caption(f"{t('restart_new_end')}: {new_end}")
-        if st.button(t("restart_job"), key="restart_btn", use_container_width=True):
+        if st.button(t("restart_job"), key="restart_btn", width="stretch"):
             with st.spinner(t("restarting")):
                 result = api.restart_job(sim_id, new_end)
             if result:
@@ -120,10 +120,8 @@ st.title(f"🌬️ {t('cases_title')} — {st.session_state.get('geo_name', '')}
 
 
 def _llm_model_name() -> str:
-    if "llm_model_name" not in st.session_state:
-        s = api.get_llm_settings()
-        st.session_state["llm_model_name"] = s["model"] if s else "?"
-    return st.session_state["llm_model_name"]
+    s = api.get_llm_settings()
+    return s["model"] if s else "?"
 
 
 def _chat_section(sim_id: int, chat_key: str, heading: str, caption: str, placeholder: str):
@@ -163,7 +161,7 @@ with left:
         with st.form("new_sim_form"):
             sim_name = st.text_input(t("case_name"))
             solver   = st.selectbox(t("solver"), ["STEADY", "UNSTEADY"])
-            if st.form_submit_button(t("create"), use_container_width=True):
+            if st.form_submit_button(t("create"), width="stretch"):
                 result = api.create_simulation(geo_id, sim_name, solver)
                 if result:
                     st.session_state["sim_id"] = result["id"]
@@ -216,7 +214,7 @@ with left:
             total = len(yaws) * len(pitches) * len(rolls)
             st.caption(t("sweep_total", total))
 
-            if st.form_submit_button(t("sweep_create"), use_container_width=True):
+            if st.form_submit_button(t("sweep_create"), width="stretch"):
                 from itertools import product as _product
                 pure_yaw = (pitches == [0] and rolls == [0])
                 created, failed = 0, 0
@@ -250,7 +248,6 @@ with left:
     if pending:
         if st.button(
             f"▶ {t('submit_all_pending', len(pending))}",
-            use_container_width=True,
             type="primary",
         ):
             ok, fail = 0, 0
@@ -275,12 +272,12 @@ with left:
                                      key=f"rename_sim_{s['id']}", label_visibility="collapsed")
             bcol1, bcol2 = st.columns(2)
             with bcol1:
-                if st.button(t("save"), key=f"save_sim_{s['id']}", use_container_width=True):
+                if st.button(t("save"), key=f"save_sim_{s['id']}", width="stretch"):
                     if new_name.strip() and api.update_simulation(s["id"], name=new_name.strip()):
                         st.session_state.pop(f"editing_sim_{s['id']}", None)
                         st.rerun()
             with bcol2:
-                if st.button(t("cancel"), key=f"cancel_sim_{s['id']}", use_container_width=True):
+                if st.button(t("cancel"), key=f"cancel_sim_{s['id']}", width="stretch"):
                     st.session_state.pop(f"editing_sim_{s['id']}", None)
                     st.rerun()
         else:
@@ -288,7 +285,7 @@ with left:
             with cols[0]:
                 prefix = "▶ " if is_selected else ""
                 label  = f"{prefix}{status_icon} {s['name']}"
-                if st.button(label, key=f"sel_{s['id']}", use_container_width=True):
+                if st.button(label, key=f"sel_{s['id']}", width="stretch"):
                     st.session_state["sim_id"] = s["id"]
                     st.rerun()
             with cols[1]:
@@ -330,12 +327,12 @@ with right:
             new_name = st.text_input(t("case_name"), value=sim["name"],
                                      key="rename_sim_header", label_visibility="collapsed")
         with hcol2:
-            if st.button(t("save"), key="save_sim_header", use_container_width=True):
+            if st.button(t("save"), key="save_sim_header", width="stretch"):
                 if new_name.strip() and api.update_simulation(sim_id, name=new_name.strip()):
                     st.session_state.pop("editing_sim_header", None)
                     st.rerun()
         with hcol3:
-            if st.button(t("cancel"), key="cancel_sim_header", use_container_width=True):
+            if st.button(t("cancel"), key="cancel_sim_header", width="stretch"):
                 st.session_state.pop("editing_sim_header", None)
                 st.rerun()
     else:
@@ -463,7 +460,7 @@ with right:
         col1, col2, col3 = st.columns(3)
         with col1:
             disabled = current_status in ("MESHING", "RUNNING") or (geo and not geo.get("stl_file_path"))
-            if st.button(t("submit_job"), disabled=disabled, use_container_width=True):
+            if st.button(t("submit_job"), disabled=disabled, width="stretch"):
                 with st.spinner(t("submitting")):
                     result = api.submit_job(sim_id, runner_type=_runner_type)
                 if result:
@@ -472,7 +469,7 @@ with right:
                 else:
                     st.error(t("submit_fail"))
         with col2:
-            if st.button(t("refresh"), use_container_width=True):
+            if st.button(t("refresh"), width="stretch"):
                 with st.spinner(t("refresh_status")):
                     api.poll_status(sim_id)
                 if current_status in ("MESHING", "RUNNING"):
@@ -484,7 +481,7 @@ with right:
         with col3:
             if st.button(t("stop"),
                          disabled=current_status not in ("MESHING", "RUNNING"),
-                         use_container_width=True):
+                         width="stretch"):
                 api.cancel_job(sim_id)
                 st.rerun()
 
@@ -565,7 +562,7 @@ with right:
             view_map = {t("view_iso"): "iso", t("view_top"): "top", t("view_side"): "side"}
             img = api.get_mesh_plot(sim_id, view=view_map[view_opt])
             if img:
-                st.image(img, use_container_width=True)
+                st.image(img, width="stretch")
             else:
                 st.info(t("mesh_not_found"))
 
@@ -573,7 +570,7 @@ with right:
             st.subheader(t("residuals"))
             img = api.get_residuals_plot(sim_id)
             if img:
-                st.image(img, use_container_width=True)
+                st.image(img, width="stretch")
             else:
                 st.info(t("log_not_found"))
 
@@ -581,7 +578,7 @@ with right:
             st.subheader(t("force_coeffs"))
             img = api.get_force_coefficients_plot(sim_id)
             if img:
-                st.image(img, use_container_width=True)
+                st.image(img, width="stretch")
             else:
                 st.info(t("fc_not_found"))
 
@@ -592,7 +589,7 @@ with right:
             field_key = "p" if field == t("field_p") else ("mesh" if field == t("field_mesh") else "U")
             img = api.get_cutting_plane_plot(sim_id, field=field_key)
             if img:
-                st.image(img, use_container_width=True)
+                st.image(img, width="stretch")
             else:
                 st.info(t("plane_not_found"))
 
@@ -663,7 +660,7 @@ with right:
                                            aspectmode="data"),
                                 height=600, margin=dict(l=0, r=0, t=0, b=0),
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig)
                         else:
                             st.info("Wall-bounded streamline files are empty.")
                     except Exception as e:
@@ -730,7 +727,7 @@ with right:
                                            aspectmode="data"),
                                 height=600, margin=dict(l=0, r=0, t=0, b=0),
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig)
                         else:
                             st.info(t("stream_not_found"))
                     except Exception as e:
@@ -738,7 +735,7 @@ with right:
                 else:
                     img = api.get_streamlines_plot(sim_id)
                     if img:
-                        st.image(img, use_container_width=True)
+                        st.image(img, width="stretch")
                     else:
                         st.info(t("stream_not_found"))
 

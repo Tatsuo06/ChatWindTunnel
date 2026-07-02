@@ -38,7 +38,7 @@ def _show_geometry_3d(stl_path: str) -> None:
         ),
         paper_bgcolor="rgb(15,15,25)",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
 if "token" not in st.session_state:
     st.warning(t("login_required"))
@@ -72,7 +72,7 @@ with st.expander(t("add_geometry"), expanded=False):
             upload_pitch = st.number_input("Pitch (°)", value=0.0, format="%.1f", help="Y軸回転")
         with rc3:
             upload_roll  = st.number_input("Roll (°)",  value=0.0, format="%.1f", help="X軸回転")
-        if st.form_submit_button(t("upload"), use_container_width=True):
+        if st.form_submit_button(t("upload"), width="stretch"):
             if uploaded:
                 with st.spinner(t("converting")):
                     name = geo_name or uploaded.name.rsplit(".", 1)[0]
@@ -105,14 +105,14 @@ else:
                 new_name = st.text_input(t("geo_name_hint"), value=geo["name"],
                                          key=f"rename_geo_{geo['id']}", label_visibility="collapsed")
             with col2:
-                if st.button(t("save"), key=f"save_geo_{geo['id']}", use_container_width=True):
+                if st.button(t("save"), key=f"save_geo_{geo['id']}", width="stretch"):
                     if new_name.strip() and api.rename_geometry(geo["id"], new_name.strip()):
                         if st.session_state.get("geo_id") == geo["id"]:
                             st.session_state["geo_name"] = new_name.strip()
                         st.session_state.pop(f"editing_geo_{geo['id']}", None)
                         st.rerun()
             with col3:
-                if st.button(t("cancel"), key=f"cancel_geo_{geo['id']}", use_container_width=True):
+                if st.button(t("cancel"), key=f"cancel_geo_{geo['id']}", width="stretch"):
                     st.session_state.pop(f"editing_geo_{geo['id']}", None)
                     st.rerun()
         else:
@@ -123,7 +123,7 @@ else:
                 stl_label = t("stl_ready") if geo.get("stl_file_path") else t("no_stl")
                 st.markdown(f"{name_md}  \n{stl_label}")
             with cols[1]:
-                if st.button(t("go_cases"), key=f"open_{geo['id']}", use_container_width=True):
+                if st.button(t("go_cases"), key=f"open_{geo['id']}", width="stretch"):
                     st.session_state["geo_id"] = geo["id"]
                     st.session_state["geo_name"] = geo["name"]
                     st.session_state.pop("sim_id", None)
@@ -135,10 +135,10 @@ else:
                         file_bytes, filename = st.session_state[dl_key]
                         st.download_button("⬇", data=file_bytes, file_name=filename,
                                            key=f"dl_{geo['id']}", help=t("download_cad"),
-                                           use_container_width=True)
+                                           width="stretch")
                     else:
                         if st.button("⬇", key=f"dl_fetch_{geo['id']}", help=t("download_cad"),
-                                     use_container_width=True):
+                                     width="stretch"):
                             result = api.download_cad(geo["id"])
                             if result:
                                 st.session_state[dl_key] = result
@@ -220,5 +220,5 @@ else:
             else:
                 preview = api.get_geometry_preview_by_geo(geo["id"])
                 if preview:
-                    st.image(preview, use_container_width=True)
+                    st.image(preview, width="stretch")
         st.divider()

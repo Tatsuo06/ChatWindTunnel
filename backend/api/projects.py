@@ -244,6 +244,7 @@ async def project_chat(project_id: int, body: ProjectChatRequest, current_user: 
             cx = round(float(avg.get("Cx", 0)), 4)
             cy = round(float(avg.get("Cy", 0)), 4) if "Cy" in avg.index else None
             cz = round(float(avg.get("Cz", 0)), 4) if "Cz" in avg.index else None
+            cm = round(float(avg.get("CmYaw", 0)), 4) if "CmYaw" in avg.index else None
             yaw = sim.yaw_deg or 0.0
             psi = math.radians(yaw)
             bx = round(-(cx * math.cos(psi) - (cy or 0) * math.sin(psi)), 4)
@@ -253,12 +254,13 @@ async def project_chat(project_id: int, body: ProjectChatRequest, current_user: 
                 p = json.loads(case_params_path.read_text()) if case_params_path.exists() else (sim.parameters or {})
                 ref_header = f"  (U={p.get('velocity_mps','?')}m/s, Aref={p.get('aref','?')}m², Lref={p.get('lref','?')}m)"
 
-            # Compact: one line per case — only yaw + coefficients
+            parts = [f"yaw={yaw}°", f"Cx={cx}", f"Cz={cz}"]
             if cy is not None:
-                line = f"  yaw={yaw}°: Cx={cx}, Cz={cz}, Cy={cy}, Cx(b)={bx}"
-            else:
-                line = f"  yaw={yaw}°: Cx={cx}, Cz={cz}, Cx(b)={bx}"
-            geo_lines.append(line)
+                parts.append(f"Cy={cy}")
+            if cm is not None:
+                parts.append(f"CmYaw={cm}")
+            parts.append(f"Cx(b)={bx}")
+            geo_lines.append("  " + ", ".join(parts))
 
         if geo_lines:
             summary_lines.append(f"Geometry: {geo.name}{' ' + ref_header if ref_header else ''}")
@@ -278,6 +280,7 @@ Coefficient definitions:
 - Cz: lift coefficient in wind axis (vertical +Z). Positive = upforce (lift).
 - Cy: side force coefficient in wind axis (+Y lateral).
 - Cx(body): drag coefficient in body-fixed frame (forward direction of the vehicle).
+- CmYaw: yaw moment coefficient about the centre of rotation (CofR). Positive = nose-into-wind moment.
 - Yaw angle: angle between wind direction and vehicle heading. Positive = wind from left.
 
 When asked about "drag", refer to Cx or Cx(body) as appropriate.

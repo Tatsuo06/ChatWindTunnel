@@ -264,7 +264,7 @@ with col_cx:
         template="plotly_white", height=380, legend_title=t("legend_geo"),
         yaxis=dict(range=[cx_ymin, cx_ymax] if cx_ymin is not None else None),
     )
-    st.plotly_chart(fig_cx, use_container_width=True)
+    st.plotly_chart(fig_cx)
 
 with col_cy:
     if all_cy:
@@ -284,7 +284,7 @@ with col_cy:
             template="plotly_white", height=380, legend_title=t("legend_geo"),
             yaxis=dict(range=[cy_ymin, cy_ymax] if cy_ymin is not None else None),
         )
-        st.plotly_chart(fig_cy, use_container_width=True)
+        st.plotly_chart(fig_cy)
 
 # ── Cz / CmYaw charts ──────────────────────────────────────────
 if all_cz or all_cmyaw:
@@ -308,7 +308,7 @@ if all_cz or all_cmyaw:
                 template="plotly_white", height=250, legend_title=t("legend_geo"),
                 yaxis=dict(range=[cz_ymin, cz_ymax] if cz_ymin is not None else None),
             )
-            st.plotly_chart(fig_cz, use_container_width=True)
+            st.plotly_chart(fig_cz)
 
     with col_cmyaw:
         if all_cmyaw:
@@ -331,7 +331,7 @@ if all_cz or all_cmyaw:
                 template="plotly_white", height=250, legend_title=t("legend_geo"),
                 yaxis=dict(range=[cmyaw_ymin, cmyaw_ymax] if cmyaw_ymin is not None else None),
             )
-            st.plotly_chart(fig_cmyaw, use_container_width=True)
+            st.plotly_chart(fig_cmyaw)
 
 # ── Body-frame charts ──────────────────────────────────────────
 if all_bx:
@@ -341,7 +341,7 @@ if all_bx:
     _diag_col, _legend_col = st.columns([1, 1])
     with _diag_col:
         _diag_fig = _body_frame_diagram()
-        st.pyplot(_diag_fig, use_container_width=True)
+        st.pyplot(_diag_fig)
         import matplotlib.pyplot as _plt
         _plt.close(_diag_fig)
     with _legend_col:
@@ -379,7 +379,7 @@ if all_bx:
             template="plotly_white", height=380, legend_title=t("legend_geo"),
             yaxis=dict(range=[bx_ymin, bx_ymax] if bx_ymin is not None else None),
         )
-        st.plotly_chart(fig_bx, use_container_width=True)
+        st.plotly_chart(fig_bx)
 
     with col_by:
         by_ymin, by_ymax = _axis_controls("by", all_by, _range_ver)
@@ -401,7 +401,7 @@ if all_bx:
             template="plotly_white", height=380, legend_title=t("legend_geo"),
             yaxis=dict(range=[by_ymin, by_ymax] if by_ymin is not None else None),
         )
-        st.plotly_chart(fig_by, use_container_width=True)
+        st.plotly_chart(fig_by)
 
     if all_bcz or all_bcmyaw:
         col_bcz, col_bcmyaw = st.columns(2)
@@ -427,7 +427,7 @@ if all_bx:
                     template="plotly_white", height=380, legend_title=t("legend_geo"),
                     yaxis=dict(range=[bcz_ymin, bcz_ymax] if bcz_ymin is not None else None),
                 )
-                st.plotly_chart(fig_bcz, use_container_width=True)
+                st.plotly_chart(fig_bcz)
 
         if all_bcmyaw:
             with col_bcmyaw:
@@ -451,7 +451,7 @@ if all_bx:
                     template="plotly_white", height=380, legend_title=t("legend_geo"),
                     yaxis=dict(range=[bcmyaw_ymin, bcmyaw_ymax] if bcmyaw_ymin is not None else None),
                 )
-                st.plotly_chart(fig_bcmyaw, use_container_width=True)
+                st.plotly_chart(fig_bcmyaw)
 
 # ── Data table ─────────────────────────────────────────────────
 st.subheader(t("numerical_data"))
@@ -493,7 +493,7 @@ for geo in data:
             "Cx": p["Cx"], "Cy": p.get("Cy"), "Cz": p["Cz"], "CmYaw": c_cmyaw,
             "Cx(b)": bx, "Cy(b)": by, "Cz(b)": bz, "CmYaw(b)": bmz,
         })
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, hide_index=True)
 
 # ── Project-level chat ──────────────────────────────────────────
 st.divider()

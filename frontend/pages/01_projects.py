@@ -14,7 +14,7 @@ with st.expander(t("new_project"), expanded=False):
     with st.form("create_project"):
         name = st.text_input(t("project_name"))
         desc = st.text_area(t("description"), height=80)
-        if st.form_submit_button(t("create")):
+        if st.form_submit_button(t("create"), width="stretch"):
             result = api.create_project(name, desc)
             if result:
                 st.success(t("project_created", result["name"]))
@@ -35,7 +35,7 @@ else:
                                     key=f"redesc_proj_{proj['id']}", height=80)
             bcol1, bcol2 = st.columns(2)
             with bcol1:
-                if st.button(t("save"), key=f"save_proj_{proj['id']}", use_container_width=True):
+                if st.button(t("save"), key=f"save_proj_{proj['id']}", width="stretch"):
                     if new_name.strip():
                         api.rename_project(proj["id"], new_name.strip(), description=new_desc)
                         if st.session_state.get("project_id") == proj["id"]:
@@ -43,7 +43,7 @@ else:
                         st.session_state.pop(f"editing_proj_{proj['id']}", None)
                         st.rerun()
             with bcol2:
-                if st.button(t("cancel"), key=f"cancel_proj_{proj['id']}", use_container_width=True):
+                if st.button(t("cancel"), key=f"cancel_proj_{proj['id']}", width="stretch"):
                     st.session_state.pop(f"editing_proj_{proj['id']}", None)
                     st.rerun()
         else:

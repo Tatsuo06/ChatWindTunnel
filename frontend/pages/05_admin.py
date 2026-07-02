@@ -99,7 +99,6 @@ if do_sync:
                 [{"Sim ID": u["sim_id"], "Project": u["project"],
                   "Geometry": u["geometry"], "Case": u["name"],
                   "Old": u["old_status"], "New": u["new_status"]} for u in updated],
-                use_container_width=True,
             )
         else:
             st.info(t("cluster_sync_no_update") + f"  (checked {len(active)}, {elapsed_str})")
@@ -115,7 +114,7 @@ with st.expander(t("add_user"), expanded=False):
         username = st.text_input(t("username"))
         password = st.text_input(t("password"), type="password")
         role     = st.selectbox(t("role"), ["user", "admin"])
-        if st.form_submit_button(t("add")):
+        if st.form_submit_button(t("add"), width="stretch"):
             result = api.create_user(username, password, role)
             if result:
                 st.success(t("user_created", username))

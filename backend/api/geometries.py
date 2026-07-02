@@ -316,7 +316,7 @@ async def geometry_domain_params(geo_id: int, current_user: CurrentUser, db: DB)
 async def geometry_preview(geo_id: int, current_user: CurrentUser, db: DB):
     """Render a PNG preview of the geometry (no simulation required)."""
     from fastapi.responses import Response
-    from backend.visualization import get_backend
+    from backend.visualization.pyvista_backend import backend as viz_backend
     from backend.foam.case_builder import _auto_domain_params, _refbox_from_rotated_stl
 
     result = await db.execute(
@@ -336,6 +336,5 @@ async def geometry_preview(geo_id: int, current_user: CurrentUser, db: DB):
     except Exception:
         domain, refbox = None, None
 
-    viz = get_backend()
-    png = viz.preview_geometry(stl_path, label=geo.name, domain=domain, refbox=refbox)
+    png = viz_backend.preview_geometry(stl_path, label=geo.name, domain=domain, refbox=refbox)
     return Response(content=png, media_type="image/png")

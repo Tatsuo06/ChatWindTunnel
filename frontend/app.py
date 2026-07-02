@@ -135,7 +135,7 @@ def _ensure_logo() -> tuple[str, str]:
         except Exception:
             font_main = font_sub = ImageFont.load_default()
         draw.text((4,  2), "Chat Wind Tunnel",              fill=BLUE, font=font_main)
-        draw.text((4, 34), "CFD Simulation Assistant by SRC", fill=GREY, font=font_sub)
+        draw.text((4, 34), "Powered by OpenFOAM", fill=GREY, font=font_sub)
         img.save(str(logo_path))
 
         icon = Image.new("RGBA", (48, 48), (255, 255, 255, 0))
@@ -145,7 +145,6 @@ def _ensure_logo() -> tuple[str, str]:
             ifont   = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 13)
         except Exception:
             ifont_s = ifont = ImageFont.load_default()
-        draw.text((4,  2), "SRC",  fill=NAVY, font=ifont_s)
         draw.text((2, 16), "Chat", fill=BLUE, font=ifont)
         draw.text((8, 30), "WT",   fill=BLUE, font=ifont)
         icon.save(str(icon_path))
@@ -164,7 +163,9 @@ def _login_page():
     illus_path = _STATIC / "tunnel_illustration.png"
     if not illus_path.exists():
         _generate_tunnel_illustration(illus_path)
-    st.image(str(illus_path), use_container_width=True)
+    _, img_col, _ = st.columns([1, 2, 1])
+    with img_col:
+        st.image(str(illus_path), width="stretch")
 
     _, col, _ = st.columns([1, 2, 1])
     with col:
@@ -174,14 +175,14 @@ def _login_page():
         )
         st.markdown(
             "<p style='text-align:center;color:#888;margin-top:4px'>"
-            "CFD Simulation Assistant by SRC</p>",
+            "Powered by OpenFOAM</p>",
             unsafe_allow_html=True,
         )
         st.divider()
         with st.form("login_form"):
             username = st.text_input(t("username"))
             password = st.text_input(t("password"), type="password")
-            submitted = st.form_submit_button(t("login"), use_container_width=True)
+            submitted = st.form_submit_button(t("login"), width="stretch")
         if submitted:
             token = login(username, password)
             if token:
@@ -202,7 +203,7 @@ def main():
         # Show language toggle on login page too
         with st.sidebar:
             lang = st.session_state["lang"]
-            if st.button("🇯🇵 日本語" if lang == "en" else "🇺🇸 English", use_container_width=True):
+            if st.button("🇯🇵 日本語" if lang == "en" else "🇺🇸 English", width="stretch"):
                 st.session_state["lang"] = "ja" if lang == "en" else "en"
                 st.rerun()
         _login_page()
@@ -225,12 +226,12 @@ def main():
     with st.sidebar:
         # Language toggle
         lang = st.session_state["lang"]
-        if st.button("🇯🇵 日本語" if lang == "en" else "🇺🇸 English", use_container_width=True):
+        if st.button("🇯🇵 日本語" if lang == "en" else "🇺🇸 English", width="stretch"):
             st.session_state["lang"] = "ja" if lang == "en" else "en"
             st.rerun()
 
         st.markdown(f"**{user.get('username', '')}** ({user.get('role', '')})")
-        if st.button(t("logout"), use_container_width=True):
+        if st.button(t("logout"), width="stretch"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
@@ -240,7 +241,7 @@ def main():
                 current_pw = st.text_input(t("current_password"), type="password")
                 new_pw     = st.text_input(t("new_password"), type="password")
                 new_pw2    = st.text_input(t("confirm_password"), type="password")
-                if st.form_submit_button(t("change"), use_container_width=True):
+                if st.form_submit_button(t("change"), width="stretch"):
                     if not current_pw or not new_pw:
                         st.error(t("pw_empty"))
                     elif new_pw != new_pw2:
