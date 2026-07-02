@@ -220,9 +220,12 @@ For **realizableKE**:
 - Outputs: `postProcessing/cuttingPlane/` (p,U on y=0), `postProcessing/streamLines/`, `postProcessing/forceCoeffs1/`
 
 ### Unsteady (motorBike_LES / pisoFoam + DDES)
-- Phase 1: SpalartAllmaras RAS with simpleFoam (500 iterations)
-- Phase 2: Copy processor*/500→processor*/0, swap lesFiles/ into system/ and constant/, run pisoFoam
-- LES model: SpalartAllmarasDDES, endTime=0.7s, deltaT=1e-4
+- Phase 1: SpalartAllmaras RAS with simpleFoam. Iteration count follows the `end_time` parameter (default 500); `writeInterval` is set equal to `endTime` so the final state is always written for the phase swap.
+- Phase 2: Copy the latest `processor*/<time>` to `processor*/0`, swap `lesFiles/` configs into system/ and constant/ (prepared as `.les`-suffixed files by `case_builder._prepare_les_files`), run pisoFoam.
+- LES model: SpalartAllmarasDDES. `endTime`/`deltaT` follow the `les_end_time`/`les_delta_t` parameters (defaults 0.7 s / 1e-4 s); `writeInterval` (timeStep-based, template 1000) is capped at the total step count so short runs still write.
+- Domain boundary conditions in `0.orig/` use `slip` on `upperWall`/`frontAndBack` (like the steady template). Do NOT use `symmetryPlane` — the auto-generated blockMeshDict declares those faces as plain `patch` type and any `symmetryPlane` field entry crashes the solver at startup.
+- forceCoeffs function object is named `forceCoeffs1` (same as steady). Phase 2 restarts at time 0, so OpenFOAM writes its coefficients to `coefficient_0.dat` alongside Phase 1's `coefficient.dat` in `postProcessing/forceCoeffs1/0/`; `parse_force_coefficients` reads both and tags rows with a `Phase` column (boundary detected where Time decreases).
+- Progress/results are phase-aware: `jobs.py /progress` reports `phase` 1 or 2 (detected from `log.pisoFoam` having Time markers), `/residuals?phase=` selects the per-phase log via `parsers.phase_logs()`, and the force-coefficient chart renders each phase as its own subplot (iteration vs seconds axes).
 
 ## Environment & Cluster
 
