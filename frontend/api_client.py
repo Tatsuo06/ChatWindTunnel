@@ -271,8 +271,9 @@ def get_geometry_domain_params(geo_id: int) -> dict | None:
     return r.json() if r.ok else None
 
 
-def get_residuals_plot(sim_id: int) -> bytes | None:
-    r = _get(f"/simulations/{sim_id}/results/residuals")
+def get_residuals_plot(sim_id: int, phase: int | None = None) -> bytes | None:
+    params = {"phase": phase} if phase is not None else None
+    r = _get(f"/simulations/{sim_id}/results/residuals", params=params)
     return r.content if r.ok else None
 
 

@@ -118,6 +118,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_fail": "Failed to save settings.",
         "current_params": "Current parameters",
         "domain_auto_note": "Domain / mesh size / refinement box: auto-calculated from geometry at job submission.",
+        "les_settings": "LES (Phase 2) settings",
+        "les_end_time": "LES end time [s]",
+        "les_delta_t": "LES time step [s]",
+        "les_fixed_turb_note": "Turbulence model is fixed (SpalartAllmaras → SpalartAllmarasDDES) for unsteady cases.",
+        "phase1_label": "Phase 1/2: RAS ({})",
+        "phase2_label": "Phase 2/2: LES ({})",
+        "residuals_phase": "Phase",
+        "residuals_phase1": "Phase 1 (RAS)",
+        "residuals_phase2": "Phase 2 (LES)",
         "chat_setup_heading": "Configure via chat",
         "chat_setup_caption": (
             "e.g. \"Set wind speed to 30 m/s with yaw 15°\" / \"Refine the mesh\"\n\n"
@@ -351,6 +360,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "settings_fail": "設定に失敗しました。",
         "current_params": "#### 現在のパラメータ",
         "domain_auto_note": "ドメイン・メッシュ数・リファインメントボックス: ジョブ投入時にCADから自動計算されます。",
+        "les_settings": "LES（Phase 2）設定",
+        "les_end_time": "LES 終了時間 [s]",
+        "les_delta_t": "LES 時間刻み幅 [s]",
+        "les_fixed_turb_note": "非定常ケースの乱流モデルは固定です（SpalartAllmaras → SpalartAllmarasDDES）。",
+        "phase1_label": "Phase 1/2: RAS ({})",
+        "phase2_label": "Phase 2/2: LES ({})",
+        "residuals_phase": "フェーズ",
+        "residuals_phase1": "Phase 1 (RAS)",
+        "residuals_phase2": "Phase 2 (LES)",
         "chat_setup_heading": "チャットで設定",
         "chat_setup_caption": (
             "例: 「風速30m/s、ヨー15度で設定して」「メッシュを細かくして」\n\n"

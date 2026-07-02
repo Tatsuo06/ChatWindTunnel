@@ -4,6 +4,25 @@ from pathlib import Path
 
 import pandas as pd
 
+from backend.db.models import SimulatorType
+
+
+def phase_logs(case_dir: Path, solver_type: SimulatorType) -> list[dict]:
+    """Return the solver log(s) for a case, one entry per execution phase.
+
+    UNSTEADY cases run Phase 1 (RAS/simpleFoam, time unit = iteration) followed
+    by Phase 2 (LES/pisoFoam, time unit = seconds) — the two logs have
+    incompatible Time axes and must never be concatenated/compared directly.
+    """
+    if solver_type == SimulatorType.unsteady:
+        return [
+            {"phase": 1, "label": "Phase 1 (RAS)", "log": case_dir / "log.simpleFoam", "unit": "iteration"},
+            {"phase": 2, "label": "Phase 2 (LES)", "log": case_dir / "log.pisoFoam", "unit": "s"},
+        ]
+    return [
+        {"phase": 1, "label": "main", "log": case_dir / "log.simpleFoam", "unit": "iteration"},
+    ]
+
 
 def parse_residuals(log_path: Path) -> pd.DataFrame:
     """Extract residual history, combining restart logs (log.X.1, log.X.2, …, log.X).
@@ -87,16 +106,26 @@ def parse_force_coefficients(postproc_dir: Path) -> pd.DataFrame:
     time_dirs = sorted(force_dir.iterdir(), key=lambda p: float(p.name) if p.name.replace(".", "").isdigit() else 0)
     dfs = []
     for td in time_dirs:
-        dat = td / "coefficient.dat"
-        if not dat.exists():
-            continue
-        # Columns: Time Cd Cd(f) Cd(r) Cl Cl(f) Cl(r) CmPitch CmRoll CmYaw Cs Cs(f) Cs(r)
-        df = pd.read_csv(dat, sep=r"\s+", comment="#", header=None)
-        df = df.iloc[:, [0, 1, 4, 9, 10]]
-        df.columns = ["Time", "Cx", "Cz", "CmYaw", "Cy"]
-        dfs.append(df)
+        # A restarted run (e.g. LES Phase 2 starting over at time 0) writes to
+        # coefficient_<startTime>.dat next to the original coefficient.dat;
+        # '.' sorts before '_' so the original (Phase 1) file comes first.
+        for dat in sorted(td.glob("coefficient*.dat")):
+            # Columns: Time Cd Cd(f) Cd(r) Cl Cl(f) Cl(r) CmPitch CmRoll CmYaw Cs Cs(f) Cs(r)
+            df = pd.read_csv(dat, sep=r"\s+", comment="#", header=None)
+            df = df.iloc[:, [0, 1, 4, 9, 10]]
+            df.columns = ["Time", "Cx", "Cz", "CmYaw", "Cy"]
+            dfs.append(df)
 
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    result = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+    if not result.empty:
+        # Detect phase boundaries: an unsteady (LES) case reuses the same
+        # forceCoeffs1 folder for Phase 1 (iterations) and Phase 2 (seconds),
+        # so Time resets/decreases at the Phase 1 -> Phase 2 handover.
+        phase = [1]
+        for i in range(1, len(result)):
+            phase.append(phase[-1] + 1 if result["Time"].iloc[i] < result["Time"].iloc[i - 1] else phase[-1])
+        result["Phase"] = phase
+    return result
 
 
 def _parse_mem_log(path: Path) -> int | None:
@@ -123,31 +152,39 @@ def parse_clock_time(case_dir: Path) -> float | None:
     return float(matches[-1]) if matches else None
 
 
-def parse_solver_diagnostics(case_dir: Path) -> dict:
+def parse_solver_diagnostics(case_dir: Path, log_override: Path | None = None) -> dict:
     """Extract solver health diagnostics from the solver log.
 
     Returns dict with:
       log_name, steps_completed, bounding_warnings (list), fatal_errors (list),
       p_residual_overflow (bool), diverged (bool), summary (str).
+
+    log_override: use this exact log file instead of auto-detecting one (e.g. to
+    get diagnostics for a specific phase of an unsteady/LES run via phase_logs()).
     """
-    if not case_dir or not case_dir.exists():
-        return {}
-    # Prefer the main solver log (simpleFoam / pisoFoam) over potentialFoam
-    log = None
-    for name in ("log.simpleFoam", "log.pisoFoam", "log.icoFoam", "log.buoyantSimpleFoam"):
-        candidate = case_dir / name
-        if candidate.exists():
-            log = candidate
-            break
-    if log is None:
-        # Fall back to any *Foam log that isn't potentialFoam
-        candidates = [
-            p for p in case_dir.glob("log.*Foam")
-            if "potential" not in p.name.lower()
-        ]
-        log = candidates[0] if candidates else None
-    if not log:
-        return {}
+    if log_override is not None:
+        log = log_override if log_override.exists() else None
+        if not log:
+            return {}
+    else:
+        if not case_dir or not case_dir.exists():
+            return {}
+        # Prefer the main solver log (simpleFoam / pisoFoam) over potentialFoam
+        log = None
+        for name in ("log.simpleFoam", "log.pisoFoam", "log.icoFoam", "log.buoyantSimpleFoam"):
+            candidate = case_dir / name
+            if candidate.exists():
+                log = candidate
+                break
+        if log is None:
+            # Fall back to any *Foam log that isn't potentialFoam
+            candidates = [
+                p for p in case_dir.glob("log.*Foam")
+                if "potential" not in p.name.lower()
+            ]
+            log = candidates[0] if candidates else None
+        if not log:
+            return {}
 
     text = log.read_text(errors="replace")
 

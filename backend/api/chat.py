@@ -89,7 +89,7 @@ async def send_message(sim_id: int, body: ChatRequest, current_user: CurrentUser
     # Call LLM
     case_dir = settings.CASES_DIR / str(sim_id)
     reply, updated_params, angle_updates, sim_creations, job_submission, sim_deletions = await chat(
-        history, sim.parameters, case_dir=case_dir, all_cases=all_cases
+        history, sim.parameters, case_dir=case_dir, all_cases=all_cases, solver_type=sim.solver_type
     )
 
     # Persist updates to current simulation
@@ -100,6 +100,10 @@ async def send_message(sim_id: int, body: ChatRequest, current_user: CurrentUser
         sim.pitch_deg = angle_updates["pitch_deg"]
     if "roll_deg" in angle_updates:
         sim.roll_deg = angle_updates["roll_deg"]
+    if "solver_type" in angle_updates:
+        sim.solver_type = (
+            SimulatorType.unsteady if angle_updates["solver_type"] == "UNSTEADY" else SimulatorType.steady
+        )
 
     # Create new simulations requested by the agent
     for sc in sim_creations:

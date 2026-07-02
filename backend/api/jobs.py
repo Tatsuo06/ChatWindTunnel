@@ -125,6 +125,19 @@ async def poll_status(sim_id: int, current_user: CurrentUser, db: DB):
     return JobStatusResponse(sim_id=sim.id, status=sim.status, job_id=sim.job_id)
 
 
+def _tail_log_text(runner, case_dir: Path, log_name: str) -> str:
+    if isinstance(runner, ClusterRunner):
+        from backend.cluster.cluster_runner import _ssh
+        remote_dir = runner._remote_dir(case_dir)
+        text, _ = _ssh(f"tail -300 {remote_dir}/{log_name} 2>/dev/null")
+        return text
+    log_path = case_dir / log_name
+    if log_path.exists():
+        lines = log_path.read_text(errors="replace").splitlines()
+        return "\n".join(lines[-300:])
+    return ""
+
+
 @router.get("/progress")
 async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
     """Return solver progress: current Time, end_time, and percent complete."""
@@ -137,25 +150,41 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
         return {"current_time": None, "end_time": None, "pct": None, "solver": None}
 
     case_dir = Path(sim.case_dir)
+    runner = get_runner()
 
     if sim.solver_type == SimulatorType.unsteady:
-        log_name = "log.pisoFoam"
-        end_time = 0.7
-    else:
-        log_name = "log.simpleFoam"
-        end_time = float(sim.parameters.get("end_time", 500))
+        # Phase 2 (LES/pisoFoam) takes over from Phase 1 (RAS/simpleFoam) partway through
+        # the Allrun script; report whichever phase has actually produced output so far.
+        text = _tail_log_text(runner, case_dir, "log.pisoFoam")
+        times = _re.findall(r"^Time = ([\d.e+\-]+)", text, _re.MULTILINE)
+        if times:
+            log_name = "log.pisoFoam"
+            end_time = float(sim.parameters.get("les_end_time", 0.7))
+            phase = 2
+        else:
+            log_name = "log.simpleFoam"
+            end_time = float(sim.parameters.get("end_time", 500))
+            phase = 1
+            text = _tail_log_text(runner, case_dir, log_name)
+            times = _re.findall(r"^Time = ([\d.e+\-]+)", text, _re.MULTILINE)
 
-    text = ""
-    runner = get_runner()
-    if isinstance(runner, ClusterRunner):
-        from backend.cluster.cluster_runner import _ssh
-        remote_dir = runner._remote_dir(case_dir)
-        text, _ = _ssh(f"tail -300 {remote_dir}/{log_name} 2>/dev/null")
-    else:
-        log_path = case_dir / log_name
-        if log_path.exists():
-            lines = log_path.read_text(errors="replace").splitlines()
-            text = "\n".join(lines[-300:])
+        if not times:
+            return {"current_time": None, "end_time": end_time, "pct": 0.0,
+                    "solver": log_name.replace("log.", ""), "phase": phase}
+
+        current_time = float(times[-1])
+        pct = min(100.0, round(current_time / end_time * 100, 1)) if end_time > 0 else 0.0
+        return {
+            "current_time": current_time,
+            "end_time": end_time,
+            "pct": pct,
+            "solver": log_name.replace("log.", ""),
+            "phase": phase,
+        }
+
+    log_name = "log.simpleFoam"
+    end_time = float(sim.parameters.get("end_time", 500))
+    text = _tail_log_text(runner, case_dir, log_name)
 
     times = _re.findall(r"^Time = ([\d.e+\-]+)", text, _re.MULTILINE)
     if not times:

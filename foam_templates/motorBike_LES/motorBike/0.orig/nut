@@ -20,10 +20,9 @@ internalField   uniform 0;
 
 boundaryField
 {
-    "(front|back)"
+    frontAndBack
     {
-        type            symmetryPlane;
-        value           uniform 0;
+        type            slip;
     }
 
     inlet
@@ -46,8 +45,7 @@ boundaryField
 
     upperWall
     {
-        type            symmetryPlane;
-        value           uniform 0;
+        type            slip;
     }
 
     "motorBike.*"

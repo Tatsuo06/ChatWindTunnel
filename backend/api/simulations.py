@@ -25,6 +25,9 @@ DEFAULT_PARAMETERS = {
     "delta_t": 1e-4,
     "n_processors": 16,
     "decompose_method": "scotch",
+    # Unsteady (LES) Phase 2 solver settings — ignored for STEADY cases
+    "les_end_time": 0.7,
+    "les_delta_t": 1e-4,
     # Force coefficients
     "aref": 0.75,
     "lref": 1.42,

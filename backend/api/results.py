@@ -158,18 +158,25 @@ async def geometry_3d_data(sim_id: int, current_user: CurrentUser, db: DB):
 
 
 @router.get("/residuals")
-async def residuals(sim_id: int, current_user: CurrentUser, db: DB):
+async def residuals(sim_id: int, current_user: CurrentUser, db: DB, phase: int | None = None):
     sim = await _get_done_sim(sim_id, db)
     if not sim.case_dir:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
     case_dir = Path(sim.case_dir)
-    # Prefer main solver logs over auxiliary ones (potentialFoam, etc.)
-    for solver in ("simpleFoam", "pisoFoam", "rhoSimpleFoam"):
-        log = case_dir / f"log.{solver}"
-        if log.exists():
-            break
+
+    if phase is not None:
+        from backend.visualization.parsers import phase_logs
+        matches = [pl["log"] for pl in phase_logs(case_dir, sim.solver_type) if pl["phase"] == phase]
+        log = matches[0] if matches and matches[0].exists() else None
     else:
-        log = next(case_dir.glob("log.*Foam"), None)
+        # Prefer main solver logs over auxiliary ones (potentialFoam, etc.)
+        for solver in ("simpleFoam", "pisoFoam", "rhoSimpleFoam"):
+            log = case_dir / f"log.{solver}"
+            if log.exists():
+                break
+        else:
+            log = next(case_dir.glob("log.*Foam"), None)
+
     if not log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No solver log found")
     return _png(backend.plot_residuals(log))

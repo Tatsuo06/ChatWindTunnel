@@ -47,12 +47,12 @@ boundaryField
 
     upperWall
     {
-        type            symmetryPlane;
+        type            slip;
     }
 
-    "(front|back)"
+    frontAndBack
     {
-        type            symmetryPlane;
+        type            slip;
     }
 
     "proc.*"

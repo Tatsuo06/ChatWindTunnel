@@ -10,10 +10,11 @@ from typing import AsyncIterator
 from litellm import acompletion
 
 from backend.core.config import settings, get_llm_model, get_llm_base_url, get_llm_api_key
+from backend.db.models import SimulatorType
 from backend.visualization.parsers import (
     parse_force_coefficients, parse_mesh_info, parse_residuals,
     parse_clock_time, parse_peak_memory,
-    parse_solver_diagnostics, parse_mesh_diagnostics,
+    parse_solver_diagnostics, parse_mesh_diagnostics, phase_logs,
 )
 
 _BASE_SYSTEM_PROMPT = """\
@@ -33,7 +34,7 @@ TOOL-USE RULES (mandatory):
 """
 
 
-def _build_system_prompt(case_dir: Path) -> str:
+def _build_system_prompt(case_dir: Path, solver_type=None) -> str:
     """Append mesh and solver diagnostics to system prompt when logs are available."""
     sections: list[str] = [_BASE_SYSTEM_PROMPT]
 
@@ -41,11 +42,21 @@ def _build_system_prompt(case_dir: Path) -> str:
     if mesh_diag.get("summary"):
         sections.append("MESH DIAGNOSTICS (from log.checkMesh):\n" + mesh_diag["summary"])
 
-    solver_diag = parse_solver_diagnostics(case_dir) if case_dir and case_dir.exists() else {}
-    if solver_diag.get("summary"):
-        sections.append("SOLVER DIAGNOSTICS (from solver log):\n" + solver_diag["summary"])
+    solver_diag_summaries = []
+    if solver_type == SimulatorType.unsteady and case_dir and case_dir.exists():
+        for pl in phase_logs(case_dir, solver_type):
+            diag = parse_solver_diagnostics(case_dir, log_override=pl["log"])
+            if diag.get("summary"):
+                solver_diag_summaries.append(f"{pl['label']}:\n" + diag["summary"])
+    else:
+        solver_diag = parse_solver_diagnostics(case_dir) if case_dir and case_dir.exists() else {}
+        if solver_diag.get("summary"):
+            solver_diag_summaries.append(solver_diag["summary"])
 
-    if mesh_diag or solver_diag:
+    if solver_diag_summaries:
+        sections.append("SOLVER DIAGNOSTICS (from solver log):\n" + "\n\n".join(solver_diag_summaries))
+
+    if mesh_diag or solver_diag_summaries:
         sections.append(
             "Use the above diagnostics to answer questions about why the simulation diverged or "
             "whether the mesh or initial conditions are problematic. "
@@ -88,8 +99,10 @@ TOOLS = [
                         "enum": ["kOmegaSST", "SpalartAllmaras", "realizableKE", "laminar"],
                         "description": "Turbulence model (default kOmegaSST). Use 'laminar' for low-Re laminar flow (no turbulence equations).",
                     },
-                    "end_time": {"type": "number", "description": "Number of iterations (steady) or physical end time in seconds (unsteady)"},
+                    "end_time": {"type": "number", "description": "Number of iterations to run (steady), or number of Phase 1 RAS iterations before switching to LES (unsteady)"},
                     "delta_t": {"type": "number", "description": "Time step size in seconds (unsteady only)"},
+                    "les_end_time": {"type": "number", "description": "Unsteady only: Phase 2 (LES) physical end time in seconds (default 0.7)"},
+                    "les_delta_t": {"type": "number", "description": "Unsteady only: Phase 2 (LES) time step size in seconds (default 1e-4)"},
                     "n_processors": {"type": "integer", "description": "Number of parallel processors"},
                 },
                 "required": [],
@@ -246,7 +259,7 @@ def _turbulence_from_intensity(velocity: float, intensity: float, lref: float = 
 
 def _execute_tool(
     tool_name: str, tool_args: dict, current_params: dict, case_dir: Path,
-    all_cases: list[dict] | None = None,
+    all_cases: list[dict] | None = None, solver_type=None,
 ) -> tuple[dict, str, dict, list[dict], dict | None, dict | None]:
     """Apply tool call to current_params dict.
     Returns (updated_params, result_message, angle_updates, sim_creations, job_submission, sim_deletions).
@@ -275,12 +288,19 @@ def _execute_tool(
         return params, result, {"yaw_deg": yaw, "pitch_deg": pitch, "roll_deg": roll}, [], None, None
 
     if tool_name == "set_solver_settings":
-        params.update({k: v for k, v in tool_args.items() if k in ("end_time", "delta_t", "n_processors")})
+        params.update({
+            k: v for k, v in tool_args.items()
+            if k in ("end_time", "delta_t", "les_end_time", "les_delta_t", "n_processors")
+        })
+        angle_updates: dict = {}
         if "solver_type" in tool_args:
             params["solver_type"] = tool_args["solver_type"]
+            # Also surface via the angle_updates channel so the caller can update
+            # the actual Simulation.solver_type DB column (see backend/api/chat.py).
+            angle_updates["solver_type"] = tool_args["solver_type"]
         if "turbulence_model" in tool_args:
             params["turbulence_model"] = tool_args["turbulence_model"]
-        return params, f"Solver settings updated: {tool_args}", {}, [], None, None
+        return params, f"Solver settings updated: {tool_args}", angle_updates, [], None, None
 
     if tool_name == "set_mesh_settings":
         params.update(tool_args)
@@ -292,12 +312,20 @@ def _execute_tool(
 
     if tool_name == "get_result_summary":
         summary_lines = []
-        log = next(case_dir.glob("log.*Foam"), None) if case_dir.exists() else None
-        if log:
-            df = parse_residuals(log)
-            if not df.empty:
-                last = df.iloc[-1]
-                summary_lines.append(f"Final residuals: {last.to_dict()}")
+        if solver_type == SimulatorType.unsteady and case_dir.exists():
+            for pl in phase_logs(case_dir, solver_type):
+                if pl["log"].exists():
+                    df = parse_residuals(pl["log"])
+                    if not df.empty:
+                        last = df.iloc[-1]
+                        summary_lines.append(f"{pl['label']} final residuals: {last.to_dict()}")
+        else:
+            log = next(case_dir.glob("log.*Foam"), None) if case_dir.exists() else None
+            if log:
+                df = parse_residuals(log)
+                if not df.empty:
+                    last = df.iloc[-1]
+                    summary_lines.append(f"Final residuals: {last.to_dict()}")
         fc_df = parse_force_coefficients(case_dir)
         if not fc_df.empty:
             last = fc_df.iloc[-1]
@@ -367,11 +395,12 @@ async def chat(
     current_params: dict,
     case_dir: Path = Path("/dev/null"),
     all_cases: list[dict] | None = None,
+    solver_type=None,
 ) -> tuple[str, dict, dict, list[dict], dict, dict]:
     """Run one chat turn.
     Returns (assistant_reply, updated_params, angle_updates, sim_creations, job_submission, sim_deletions).
     """
-    full_messages = [{"role": "system", "content": _build_system_prompt(case_dir)}] + messages
+    full_messages = [{"role": "system", "content": _build_system_prompt(case_dir, solver_type=solver_type)}] + messages
 
     response = await acompletion(
         model=f"openai/{get_llm_model()}",
@@ -396,7 +425,7 @@ async def chat(
         for tc in message.tool_calls:
             tool_args = json.loads(tc.function.arguments)
             params, result_msg, angles, creations, js, sd = _execute_tool(
-                tc.function.name, tool_args, params, case_dir, all_cases=all_cases
+                tc.function.name, tool_args, params, case_dir, all_cases=all_cases, solver_type=solver_type
             )
             angle_updates.update({k: v for k, v in angles.items() if v is not None})
             sim_creations.extend(creations)

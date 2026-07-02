@@ -131,8 +131,10 @@ _ALLRUN_LES = textwrap.dedent("""\
     rm -f log.mem_monitor.tmp
 
     # === Phase 2: LES (SpalartAllmarasDDES) ===
-    # Swap steady-state solution as LES initial condition
-    ls -d processor* | xargs -I {} sh -c 'cp -r {}/500 {}/0_les; rm -rf {}/0; mv {}/0_les {}/0; rm -rf {}/0/uniform'
+    # Swap steady-state solution as LES initial condition (use the latest
+    # written time directory rather than a hardcoded value, since Phase 1's
+    # endTime is configurable)
+    ls -d processor* | xargs -I {} sh -c 'latest=$(ls {} | grep -E "^[0-9]+(\.[0-9]+)?$" | sort -g | tail -1); cp -r {}/$latest {}/0_les; rm -rf {}/0; mv {}/0_les {}/0; rm -rf {}/0/uniform'
 
     # Replace config files with LES versions
     cp -f system/controlDict.les   system/controlDict
@@ -225,13 +227,14 @@ def build_case(
     _write_surface_feature_extract(case_dir)
     _write_streamlines(case_dir, params)
 
-    turb_model = params.get("turbulence_model", "kOmegaSST")
-    if turb_model == "SpalartAllmaras":
-        _apply_spalart_allmaras(case_dir)
-    elif turb_model == "realizableKE":
-        _apply_kepsilon(case_dir, "realizableKE")
-    elif turb_model == "laminar":
-        _apply_laminar(case_dir)
+    if solver_type == SimulatorType.steady:
+        turb_model = params.get("turbulence_model", "kOmegaSST")
+        if turb_model == "SpalartAllmaras":
+            _apply_spalart_allmaras(case_dir)
+        elif turb_model == "realizableKE":
+            _apply_kepsilon(case_dir, "realizableKE")
+        elif turb_model == "laminar":
+            _apply_laminar(case_dir)
 
     # Empty .foam file required by pyvista.OpenFOAMReader
     (case_dir / "case.foam").touch()
@@ -251,7 +254,7 @@ def build_case(
 
     # For LES: copy LES config files alongside steady files so Allrun can swap them
     if solver_type == SimulatorType.unsteady:
-        _prepare_les_files(case_dir)
+        _prepare_les_files(case_dir, params)
 
     return case_dir
 
@@ -325,6 +328,15 @@ def _write_control_dict(case_dir: Path, solver_type: SimulatorType, params: dict
     content = ctrl_path.read_text()
     if solver_type == SimulatorType.steady:
         content = _set_value(content, "endTime", str(int(params.get("end_time", 500))))
+    elif solver_type == SimulatorType.unsteady:
+        # Phase 1 (RAS) iteration count, before switching to LES in Phase 2.
+        # writeInterval must match endTime: the only purpose of Phase 1's output
+        # is to provide the final state as the LES initial condition — if nothing
+        # is written (endTime not a multiple of the template's writeInterval),
+        # the phase swap would silently fall back to the time-0 uniform field.
+        end_time = int(params.get("end_time", 500))
+        content = _set_value(content, "endTime", str(end_time))
+        content = _set_value(content, "writeInterval", str(end_time))
     ctrl_path.write_text(content)
 
 
@@ -1017,15 +1029,35 @@ streamLinesBack
     sl_file.write_text(content)
 
 
-def _prepare_les_files(case_dir: Path) -> None:
+def _prepare_les_files(case_dir: Path, params: dict) -> None:
     """Copy LES config files alongside steady ones with .les suffix so Allrun can swap."""
-    for fname in ("controlDict", "fvSchemes", "fvSolution"):
+    for fname in ("fvSchemes", "fvSolution"):
         src = LES_FILES / fname
         if src.exists():
             shutil.copy2(src, case_dir / "system" / f"{fname}.les")
     tp_src = LES_FILES / "turbulenceProperties"
     if tp_src.exists():
         shutil.copy2(tp_src, case_dir / "constant" / "turbulenceProperties.les")
+    _write_les_control_dict(case_dir, params)
+
+
+def _write_les_control_dict(case_dir: Path, params: dict) -> None:
+    """Write system/controlDict.les with Phase 2 (LES) endTime/deltaT from params."""
+    src = LES_FILES / "controlDict"
+    if not src.exists():
+        return
+    end_time = float(params.get("les_end_time", 0.7))
+    delta_t = float(params.get("les_delta_t", 1e-4))
+    # writeControl is timeStep-based; cap the template's interval (1000) at the
+    # total step count so short runs still write at least their final state
+    # (otherwise reconstructPar finds no times and the volume data is lost)
+    n_steps = max(1, round(end_time / delta_t))
+    write_interval = min(1000, n_steps)
+    content = src.read_text()
+    content = _set_value(content, "endTime", str(end_time))
+    content = _set_value(content, "deltaT", str(delta_t))
+    content = _set_value(content, "writeInterval", str(write_interval))
+    (case_dir / "system" / "controlDict.les").write_text(content)
 
 
 def _set_value(content: str, key: str, value: str) -> str:

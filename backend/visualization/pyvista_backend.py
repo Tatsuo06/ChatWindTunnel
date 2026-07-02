@@ -5,6 +5,7 @@ from pathlib import Path
 import pyvista as pv
 import plotly.graph_objects as go
 import plotly.io as pio
+from plotly.subplots import make_subplots
 
 from backend.visualization.base import VisualizationBackend
 from backend.visualization.parsers import parse_force_coefficients, parse_residuals
@@ -95,6 +96,34 @@ class PyVistaBackend(VisualizationBackend):
         df = parse_force_coefficients(postproc_dir)
         if df.empty:
             return _empty_plot("No force coefficient data found")
+
+        n_phases = df["Phase"].nunique() if "Phase" in df.columns else 1
+        if n_phases > 1:
+            # Unsteady (LES) case: Phase 1 (RAS, iterations) and Phase 2 (LES, seconds)
+            # share the same postProcessing folder but have incompatible Time axes —
+            # render them as separate subplots rather than one continuous line.
+            colors = {"Cx": "#636efa", "Cz": "#ef553b", "CmYaw": "#00cc96", "Cy": "#ab63fa"}
+            fig = make_subplots(rows=1, cols=n_phases,
+                                 subplot_titles=[f"Phase {p}" for p in sorted(df["Phase"].unique())])
+            for i, phase in enumerate(sorted(df["Phase"].unique()), start=1):
+                phase_df = df[df["Phase"] == phase]
+                for col in ("Cx", "Cz", "CmYaw", "Cy"):
+                    if col in phase_df.columns:
+                        fig.add_trace(
+                            go.Scatter(x=phase_df["Time"], y=phase_df[col], name=col,
+                                       mode="lines", line=dict(color=colors[col]),
+                                       legendgroup=col, showlegend=(i == 1)),
+                            row=1, col=i,
+                        )
+                xaxis_title = "Iteration" if phase == 1 else "Time [s]"
+                fig.update_xaxes(title_text=xaxis_title, row=1, col=i)
+            fig.update_layout(
+                title="Force / Moment Coefficients",
+                yaxis_title="Coefficient",
+                template="plotly_white",
+                height=400,
+            )
+            return pio.to_image(fig, format="png")
 
         fig = go.Figure()
         for col in ("Cx", "Cz", "CmYaw", "Cy"):
