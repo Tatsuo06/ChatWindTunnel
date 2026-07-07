@@ -244,6 +244,13 @@ For **realizableKE**:
 - UI: analysis type chosen at case creation; gas settings (preset/density ratio/release point/rate) in the Setup tab; the cutting-plane field selector gains "C (concentration)" (= T) for dispersion cases.
 - Verified: light gas (ratio 0.5) plume rises above the source, heavy gas (ratio 1.5) slumps to the ground (98% of plume mass below source height).
 
+### Gas-dispersion LES restart (gas / rhoReactingBuoyantFoam) — Stage 3
+- A finished **aero LES** case (kOmegaSSTDDES/IDDES) can be restarted as a compressible 2-species gas-dispersion LES via the Run tab ("ガス拡散LESへ移行") or `POST /job/restart mode="gas"`. Marker: `parameters["gas_les"]=True`; solver_type stays UNSTEADY. Configs in `foam_templates/gasFiles/` (chemistry off, combustion none, species air/GAS; GAS molWeight = gas_density_ratio × 28.96, default hydrogen 0.07). Density comes from the mixture composition, so **any density ratio is quantitatively valid** (unlike the Boussinesq dispersion case type).
+- Field mapping at restart (`build_gas_les_restart_case` / `_ALLRUN_GAS_RESTART`): U/k/omega/nut carry over from the LES time dir; kinematic **p and volumetric phi are deleted** and uniform absolute-pressure/T=300K/GAS=0/**air=1**/alphat fields (with `"proc.*" processor` entries) are overlaid per-processor. The solver forces `p_rgh = p - rho*gh` at startup, so p_rgh initials are uncritical.
+- OpenFOAM v2206 requirements discovered the hard way: the buoyant reacting solver needs **heRhoThermo** (hePsiThermo fatal-errors as "Unknown rhoReactionThermo type"); `reactions` must not contain an `elements {}` dictionary (list or absent only); initial **air mass fraction must be 1** (all-zero Y is fatal); `fvSchemes` needs `fluxRequired { p_rgh; }`.
+- The gas stage reuses the aero-LES time range, so its Allrun **archives `postProcessing` → `postProcessing_aero`** before running (latest-time pickers would otherwise mix stages). V1: no forceCoeffs in the gas stage; no gas-stage extension/re-run.
+- Phase framework has a third stage: `parsers.PHASE3_LOGS` (log.rhoReactingBuoyantFoam), phase_logs appends "Phase 3 (Gas LES)" when the log exists, `parse_phase_times().gas_s`, `parse_peak_memory().gasLES` (log.mem_gas), progress reports phase=3, and the Convergence tab loops phases dynamically. Cutting-plane/animation fields gain GAS (concentration) and T for gas_les cases.
+
 ## Environment & Cluster
 
 - Local OpenFOAM: set `FOAM_LOCAL_APP` in `.env` to the app path (e.g. `/Applications/OpenFOAM-v2206.app`). Leave `CLUSTER_USER` empty to use the local runner. If `FOAM_LOCAL_APP` is not set or the path does not exist, a clear error is raised.

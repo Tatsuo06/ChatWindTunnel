@@ -139,6 +139,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
                             "|density difference|/air density up to ~0.2-0.3 (exhaust gas, diluted leaks). "
                             "Strongly buoyant gases (*e.g. pure hydrogen) are indicative only."),
         "field_c": "C (concentration)",
+        "field_t": "T (temperature)",
+        "restart_gas_title": "🧪 Restart as gas-dispersion LES",
+        "restart_gas_note": ("Runs rhoReactingBuoyantFoam (2 species, no chemistry) seeded from this "
+                             "LES result. Density comes from the gas composition, so any density "
+                             "ratio (hydrogen, LNG, ...) is quantitatively valid."),
+        "restart_gas_btn": "🧪 Start gas-dispersion LES",
+        "gas_end_time_lbl": "Gas LES end time [s]",
+        "gas_delta_t_lbl": "Gas LES time step [s]",
+        "residuals_phase3": "Phase 3 (Gas LES)",
+        "phase3_label": "Phase 3: Gas LES ({})",
+        "anim_plane_c": "Cutting plane C (concentration)",
         "phase1_label": "Phase 1/2: RAS ({})",
         "phase2_label": "Phase 2/2: LES ({})",
         "residuals_phase": "Phase",
@@ -413,6 +424,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "boussinesq_note": ("浮力はBoussinesq近似です。定量的に妥当なのは |密度差|/空気密度 ≲ 0.2〜0.3"
                             "（排気ガス・希釈された漏洩など）。※純水素など浮力差が大きいガスは参考値です。"),
         "field_c": "C（濃度）",
+        "field_t": "T（温度）",
+        "restart_gas_title": "🧪 ガス拡散LESへ移行",
+        "restart_gas_note": ("このLES結果を初期値として rhoReactingBuoyantFoam（2成分・化学反応なし）を"
+                             "実行します。密度はガス組成から直接計算されるため、水素やLNGなど"
+                             "任意の密度比を定量的に扱えます。"),
+        "restart_gas_btn": "🧪 ガス拡散LES開始",
+        "gas_end_time_lbl": "ガスLES 終了時間 [s]",
+        "gas_delta_t_lbl": "ガスLES 時間刻み幅 [s]",
+        "residuals_phase3": "Phase 3 (Gas LES)",
+        "phase3_label": "Phase 3: Gas LES ({})",
+        "anim_plane_c": "断面 C（濃度）",
         "phase1_label": "Phase 1/2: RAS ({})",
         "phase2_label": "Phase 2/2: LES ({})",
         "residuals_phase": "フェーズ",

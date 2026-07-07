@@ -10,6 +10,8 @@ from backend.db.models import SimulatorType
 # simpleFoam/pisoFoam; buoyant gas-dispersion cases use the Boussinesq solvers.
 PHASE1_LOGS = ("log.simpleFoam", "log.buoyantBoussinesqSimpleFoam")
 PHASE2_LOGS = ("log.pisoFoam", "log.buoyantBoussinesqPimpleFoam")
+# Optional third stage: gas-dispersion LES restarted from the aero LES
+PHASE3_LOGS = ("log.rhoReactingBuoyantFoam",)
 
 
 def _first_existing_log(case_dir: Path, names: tuple) -> Path:
@@ -29,10 +31,14 @@ def phase_logs(case_dir: Path, solver_type: SimulatorType) -> list[dict]:
     Time axes and must never be concatenated/compared directly.
     """
     if solver_type == SimulatorType.unsteady:
-        return [
+        entries = [
             {"phase": 1, "label": "Phase 1 (RAS)", "log": _first_existing_log(case_dir, PHASE1_LOGS), "unit": "iteration"},
             {"phase": 2, "label": "Phase 2 (LES)", "log": _first_existing_log(case_dir, PHASE2_LOGS), "unit": "s"},
         ]
+        gas_log = _first_existing_log(case_dir, PHASE3_LOGS)
+        if gas_log.exists():
+            entries.append({"phase": 3, "label": "Phase 3 (Gas LES)", "log": gas_log, "unit": "s"})
+        return entries
     return [
         {"phase": 1, "label": "main", "log": _first_existing_log(case_dir, PHASE1_LOGS), "unit": "iteration"},
     ]
@@ -150,11 +156,12 @@ def _parse_mem_log(path: Path) -> int | None:
 
 
 def parse_peak_memory(case_dir: Path) -> dict:
-    """Return peak RSS in kB for snappyHexMesh, simpleFoam and pisoFoam."""
+    """Return peak RSS in kB per stage (mesh, steady, LES, gas LES)."""
     return {
         "simpleFoam":    _parse_mem_log(case_dir / "log.mem_monitor"),
         "snappyHexMesh": _parse_mem_log(case_dir / "log.mem_snappy"),
         "pisoFoam":      _parse_mem_log(case_dir / "log.mem_piso"),
+        "gasLES":        _parse_mem_log(case_dir / "log.mem_gas"),
     }
 
 
@@ -196,6 +203,7 @@ def parse_phase_times(case_dir: Path) -> dict:
         "mesh_s": mesh_s,
         "phase1_s": _final_clock_time(_first_existing_log(case_dir, PHASE1_LOGS)),
         "phase2_s": _final_clock_time(_first_existing_log(case_dir, PHASE2_LOGS)),
+        "gas_s": _final_clock_time(_first_existing_log(case_dir, PHASE3_LOGS)),
     }
 
 
@@ -218,7 +226,7 @@ def parse_solver_diagnostics(case_dir: Path, log_override: Path | None = None) -
             return {}
         # Prefer the main solver log (simpleFoam / pisoFoam) over potentialFoam
         log = None
-        for name in (*PHASE1_LOGS, *PHASE2_LOGS, "log.icoFoam", "log.buoyantSimpleFoam"):
+        for name in (*PHASE1_LOGS, *PHASE2_LOGS, *PHASE3_LOGS, "log.icoFoam", "log.buoyantSimpleFoam"):
             candidate = case_dir / name
             if candidate.exists():
                 log = candidate

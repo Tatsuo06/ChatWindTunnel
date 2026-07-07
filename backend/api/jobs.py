@@ -129,11 +129,15 @@ async def poll_status(sim_id: int, current_user: CurrentUser, db: DB):
 
 
 def _phase_log_names(params: dict) -> tuple[str, str]:
-    """(phase1, phase2) solver log names — Boussinesq solvers for dispersion cases.
+    """(phase1, final-phase) solver log names, parameter-based (not
+    file-existence-based) because progress polling tails logs on the cluster
+    where local existence checks don't apply.
 
-    Parameter-based (not file-existence-based) because progress polling tails
-    logs on the cluster where local existence checks don't apply.
+    The second name is the log of the *last* phase the case will run: the gas
+    LES for gas-restarted cases, otherwise the aero/dispersion LES solver.
     """
+    if params.get("gas_les"):
+        return "log.simpleFoam", "log.rhoReactingBuoyantFoam"
     if params.get("case_type") == "dispersion":
         return "log.buoyantBoussinesqSimpleFoam", "log.buoyantBoussinesqPimpleFoam"
     return "log.simpleFoam", "log.pisoFoam"
@@ -174,8 +178,12 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
         times = _re.findall(r"^Time = ([\d.e+\-]+)", text, _re.MULTILINE)
         if times:
             log_name = phase2_log
-            end_time = float(sim.parameters.get("les_end_time", 0.7))
-            phase = 2
+            if sim.parameters.get("gas_les"):
+                end_time = float(sim.parameters.get("gas_end_time", 0.7))
+                phase = 3
+            else:
+                end_time = float(sim.parameters.get("les_end_time", 0.7))
+                phase = 2
         else:
             log_name = phase1_log
             end_time = float(sim.parameters.get("end_time", 500))
@@ -217,18 +225,26 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
 
 
 class RestartRequest(BaseModel):
-    mode: str = "steady"           # "steady" = extend iterations | "unsteady" = transition to LES
+    mode: str = "steady"           # "steady" = extend | "unsteady" = to LES | "gas" = to gas-dispersion LES
     new_end_time: int | None = None
     les_end_time: float | None = None
     les_delta_t: float | None = None
     les_anim_interval: int | None = None
     les_model: str = "kOmegaSSTDDES"
+    gas_end_time: float | None = None
+    gas_delta_t: float | None = None
+    gas_model: str | None = None
+    gas_density_ratio: float | None = None
+    source_position: list | None = None
+    source_rate: float | None = None
 
 
 @router.post("/restart", response_model=JobStatusResponse)
 async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUser, db: DB):
-    """Restart a finished steady case: extend it, or transition it to LES."""
-    from backend.foam.case_builder import build_les_restart_case, LES_RESTART_MODELS
+    """Restart a finished case: extend steady, transition to LES, or to gas-dispersion LES."""
+    from backend.foam.case_builder import (
+        build_les_restart_case, build_gas_les_restart_case, LES_RESTART_MODELS,
+    )
 
     sim = await _get_sim_with_geo(sim_id, db)
     if current_user.role != UserRole.admin and sim.geometry.project.owner_id != current_user.id:
@@ -237,7 +253,7 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only restart DONE or FAILED jobs")
     if not sim.case_dir:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No case directory found")
-    if sim.solver_type != SimulatorType.steady:
+    if body.mode in ("steady", "unsteady") and sim.solver_type != SimulatorType.steady:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Restart only supported for steady-state simulations")
 
     if body.mode == "steady":
@@ -267,8 +283,47 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
         build_les_restart_case(Path(sim.case_dir), new_params)
         new_solver_type = SimulatorType.unsteady
 
+    elif body.mode == "gas":
+        if sim.solver_type != SimulatorType.unsteady:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Gas-dispersion restart requires a completed LES (unsteady) case")
+        if sim.status != SimulationStatus.done:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Gas-dispersion restart requires a completed (DONE) LES run")
+        if sim.parameters.get("gas_les"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="This case already ran the gas-dispersion stage")
+        les_model = sim.parameters.get("les_model")
+        if les_model not in LES_RESTART_MODELS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Gas-dispersion restart requires a kOmegaSST-DES aero LES "
+                                       f"(this case used {les_model})")
+        gas_model = body.gas_model or les_model
+        if gas_model not in LES_RESTART_MODELS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"gas_model must be one of {LES_RESTART_MODELS}")
+        gas_end = body.gas_end_time if body.gas_end_time is not None else 0.7
+        gas_dt = body.gas_delta_t if body.gas_delta_t is not None else 1e-4
+        new_params = {
+            **sim.parameters,
+            "gas_les": True,
+            "gas_end_time": gas_end,
+            "gas_delta_t": gas_dt,
+            "gas_model": gas_model,
+            "les_end_time": gas_end,
+            "les_delta_t": gas_dt,
+        }
+        if body.gas_density_ratio is not None:
+            new_params["gas_density_ratio"] = body.gas_density_ratio
+        if body.source_position is not None:
+            new_params["source_position"] = body.source_position
+        if body.source_rate is not None:
+            new_params["source_rate"] = body.source_rate
+        build_gas_les_restart_case(Path(sim.case_dir), new_params)
+        new_solver_type = sim.solver_type
+
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'steady' or 'unsteady'")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'steady', 'unsteady' or 'gas'")
 
     runner = get_runner()
     if isinstance(runner, ClusterRunner):

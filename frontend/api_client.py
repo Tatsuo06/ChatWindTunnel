@@ -224,6 +224,21 @@ def restart_job_les(sim_id: int, les_end_time: float, les_delta_t: float,
     return r.json() if r.ok else None
 
 
+def restart_job_gas(sim_id: int, gas_end_time: float, gas_delta_t: float,
+                    gas_model: str, gas_density_ratio: float,
+                    source_position: list | None, source_rate: float) -> dict | None:
+    r = _post(f"/simulations/{sim_id}/job/restart", json={
+        "mode": "gas",
+        "gas_end_time": gas_end_time,
+        "gas_delta_t": gas_delta_t,
+        "gas_model": gas_model,
+        "gas_density_ratio": gas_density_ratio,
+        "source_position": source_position,
+        "source_rate": source_rate,
+    })
+    return r.json() if r.ok else None
+
+
 def get_job_progress(sim_id: int) -> dict | None:
     r = _get(f"/simulations/{sim_id}/job/progress")
     return r.json() if r.ok else None

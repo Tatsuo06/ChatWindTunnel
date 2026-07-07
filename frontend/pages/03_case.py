@@ -83,6 +83,100 @@ def _show_geometry_3d(data: dict) -> None:
     st.plotly_chart(fig)
 
 
+def _gas_settings_widgets(params: dict, key_prefix: str = "") -> dict:
+    """Shared gas-release widgets (preset / density ratio / source / rate).
+
+    Returns {"gas_density_ratio", "source_rate", "source_position"} where
+    source_position None means auto (top centre of the geometry).
+    """
+    _presets = {t("gas_preset_co2"): 1.53, t("gas_preset_methane"): 0.55,
+                t("gas_preset_hydrogen"): 0.07, t("gas_preset_custom"): None}
+    gcol1, gcol2, gcol3 = st.columns(3)
+    with gcol1:
+        preset_sel = st.selectbox(t("gas_preset"), list(_presets.keys()), index=2,
+                                  key=f"{key_prefix}gas_preset")
+    with gcol2:
+        _preset_ratio = _presets[preset_sel]
+        ratio = st.number_input(
+            t("gas_density_ratio"),
+            value=float(_preset_ratio if _preset_ratio is not None
+                        else params.get("gas_density_ratio", 0.07)),
+            min_value=0.01, step=0.1, format="%.2f",
+            disabled=_preset_ratio is not None,
+            key=f"{key_prefix}gas_ratio",
+        )
+        if _preset_ratio is not None:
+            ratio = _preset_ratio
+    with gcol3:
+        rate = st.number_input(
+            t("source_rate"),
+            value=float(params.get("source_rate", 1.0)),
+            min_value=0.0, step=0.5,
+            key=f"{key_prefix}gas_rate",
+        )
+    auto_src = st.checkbox(t("source_auto"),
+                           value=params.get("source_position") is None,
+                           key=f"{key_prefix}gas_autosrc")
+    src_pos = None
+    if not auto_src:
+        _sp = params.get("source_position") or [0.0, 0.0, 1.0]
+        scol1, scol2, scol3 = st.columns(3)
+        with scol1:
+            sx = st.number_input(t("source_x"), value=float(_sp[0]), step=0.1,
+                                 format="%.3f", key=f"{key_prefix}gas_sx")
+        with scol2:
+            sy = st.number_input(t("source_y"), value=float(_sp[1]), step=0.1,
+                                 format="%.3f", key=f"{key_prefix}gas_sy")
+        with scol3:
+            sz = st.number_input(t("source_z"), value=float(_sp[2]), step=0.1,
+                                 format="%.3f", key=f"{key_prefix}gas_sz")
+        src_pos = [sx, sy, sz]
+    return {"gas_density_ratio": ratio, "source_rate": rate, "source_position": src_pos}
+
+
+def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
+    """Restart a finished aero LES case as a gas-dispersion LES (rhoReactingBuoyantFoam)."""
+    params = sim.get("parameters", {})
+    if params.get("gas_les"):
+        return  # already ran the gas stage
+    if params.get("les_model") not in ("kOmegaSSTDDES", "kOmegaSSTIDDES"):
+        return  # legacy SA-based LES: no compatible restart path
+    with st.expander(t("restart_gas_title"), expanded=False):
+        st.caption(t("restart_gas_note"))
+        gas = _gas_settings_widgets(params, key_prefix="gr_")
+        gc1, gc2, gc3 = st.columns(3)
+        with gc1:
+            gas_end = st.number_input(
+                t("gas_end_time_lbl"),
+                value=float(params.get("gas_end_time", params.get("les_end_time", 0.7))),
+                min_value=0.001, step=0.1, format="%.4f", key="gr_end",
+            )
+        with gc2:
+            gas_dt = st.number_input(
+                t("gas_delta_t_lbl"),
+                value=float(params.get("gas_delta_t", params.get("les_delta_t", 1e-4))),
+                min_value=1e-6, step=1e-5, format="%.6f", key="gr_dt",
+            )
+        with gc3:
+            gas_model = st.selectbox(
+                t("les_model_lbl"),
+                ["kOmegaSSTDDES", "kOmegaSSTIDDES"],
+                index=0 if params.get("les_model") != "kOmegaSSTIDDES" else 1,
+                key="gr_model",
+            )
+        if st.button(t("restart_gas_btn"), key="gr_btn", width="stretch"):
+            with st.spinner(t("restarting")):
+                result = api.restart_job_gas(
+                    sim_id, gas_end, gas_dt, gas_model,
+                    gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
+                )
+            if result:
+                st.success(t("restart_ok", result.get("job_id")))
+                st.rerun()
+            else:
+                st.error(t("restart_fail"))
+
+
 def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> None:
     with st.expander(t("restart_job"), expanded=False):
         params = sim.get("parameters", {})
@@ -477,46 +571,9 @@ with right:
         # ── Gas dispersion settings (dispersion cases only) ─────────
         gas_updates = {}
         if sim.get("parameters", {}).get("case_type") == "dispersion":
-            _gp = sim.get("parameters", {})
             st.markdown(f"#### {t('gas_settings')}")
             st.caption(t("boussinesq_note"))
-            _presets = {t("gas_preset_co2"): 1.53, t("gas_preset_methane"): 0.55,
-                        t("gas_preset_hydrogen"): 0.07, t("gas_preset_custom"): None}
-            gcol1, gcol2, gcol3 = st.columns(3)
-            with gcol1:
-                preset_sel = st.selectbox(t("gas_preset"), list(_presets.keys()), index=3)
-            with gcol2:
-                _preset_ratio = _presets[preset_sel]
-                ratio = st.number_input(
-                    t("gas_density_ratio"),
-                    value=float(_preset_ratio if _preset_ratio is not None
-                                else _gp.get("gas_density_ratio", 1.5)),
-                    min_value=0.01, step=0.1, format="%.2f",
-                    disabled=_preset_ratio is not None,
-                )
-                if _preset_ratio is not None:
-                    ratio = _preset_ratio
-            with gcol3:
-                rate = st.number_input(
-                    t("source_rate"),
-                    value=float(_gp.get("source_rate", 1.0)),
-                    min_value=0.0, step=0.5,
-                )
-            auto_src = st.checkbox(t("source_auto"),
-                                   value=_gp.get("source_position") is None)
-            src_pos = None
-            if not auto_src:
-                _sp = _gp.get("source_position") or [0.0, 0.0, 1.0]
-                scol1, scol2, scol3 = st.columns(3)
-                with scol1:
-                    sx = st.number_input(t("source_x"), value=float(_sp[0]), step=0.1, format="%.3f")
-                with scol2:
-                    sy = st.number_input(t("source_y"), value=float(_sp[1]), step=0.1, format="%.3f")
-                with scol3:
-                    sz = st.number_input(t("source_z"), value=float(_sp[2]), step=0.1, format="%.3f")
-                src_pos = [sx, sy, sz]
-            gas_updates = {"gas_density_ratio": ratio, "source_rate": rate,
-                           "source_position": src_pos}
+            gas_updates = _gas_settings_widgets(sim.get("parameters", {}))
 
         if geo and geo.get("stl_file_path"):
             bbox = api.get_geometry_bbox(geo_id)
@@ -641,6 +698,8 @@ with right:
                     label = t("phase1_label", solver)
                 elif phase == 2:
                     label = t("phase2_label", solver)
+                elif phase == 3:
+                    label = t("phase3_label", solver)
                 else:
                     label = solver
                 st.progress(int(pct), text=f"{label}  Time = {cur} / {end}  ({pct:.1f}%)")
@@ -670,9 +729,10 @@ with right:
             mesh_s   = stats.get("mesh_s") if stats else None
             phase1_s = stats.get("phase1_s") if stats else None
             phase2_s = stats.get("phase2_s") if stats else None
+            gas_s    = stats.get("gas_s") if stats else None
 
             if sim.get("solver_type") == "UNSTEADY":
-                # LES: total plus a mesh / Phase 1 / Phase 2 breakdown
+                # LES: total plus a mesh / Phase 1 / Phase 2 (/ Gas) breakdown
                 if wall_str:
                     st.caption(f"{t('calc_time')}: {wall_str}")
                 if mesh_s is not None:
@@ -681,6 +741,8 @@ with right:
                     st.caption(f"{t('residuals_phase1')}: {_fmt_secs(phase1_s)}")
                 if phase2_s is not None:
                     st.caption(f"{t('residuals_phase2')}: {_fmt_secs(phase2_s)}")
+                if gas_s is not None:
+                    st.caption(f"{t('residuals_phase3')}: {_fmt_secs(gas_s)}")
             else:
                 # STEADY: mesh generation and the solver ClockTime (falls back to
                 # the wall total when the solver log has no ClockTime)
@@ -696,17 +758,22 @@ with right:
                 snappy_kb = stats.get("peak_memory_snappy_kb")
                 simple_kb = stats.get("peak_memory_simple_kb")
                 piso_kb = stats.get("peak_memory_piso_kb")
+                gas_kb = stats.get("peak_memory_gas_kb")
                 if snappy_kb:
                     mem_parts.append(f"snappyHexMesh: {snappy_kb/1024/1024:.1f} GB")
                 if simple_kb:
                     mem_parts.append(f"simpleFoam: {simple_kb/1024/1024:.1f} GB")
                 if piso_kb:
                     mem_parts.append(f"pisoFoam: {piso_kb/1024/1024:.1f} GB")
+                if gas_kb:
+                    mem_parts.append(f"gasLES: {gas_kb/1024/1024:.1f} GB")
                 if mem_parts:
                     st.caption(f"{t('stat_peak_memory')}: {' / '.join(mem_parts)}")
 
             if sim.get("solver_type") == "STEADY":
                 _show_restart_expander(sim, sim_id, allow_les=True)
+            elif sim.get("solver_type") == "UNSTEADY":
+                _show_gas_restart_expander(sim, sim_id)
 
         _results_chat(sim_id, "chat_run")
 
@@ -744,8 +811,12 @@ with right:
         else:
             st.subheader(t("residuals"))
             if sim.get("solver_type") == "UNSTEADY":
-                # Show RAS (Phase 1) first, then LES (Phase 2) below it
-                for phase, label in ((1, t("residuals_phase1")), (2, t("residuals_phase2"))):
+                # Stack the phases top to bottom: RAS, LES, and (when the case
+                # was restarted into gas dispersion) the gas LES
+                _phases = [(1, t("residuals_phase1")), (2, t("residuals_phase2"))]
+                if sim.get("parameters", {}).get("gas_les"):
+                    _phases.append((3, t("residuals_phase3")))
+                for phase, label in _phases:
                     st.markdown(f"**{label}**")
                     img = api.get_residuals_plot(sim_id, phase=phase)
                     if img:
@@ -777,7 +848,13 @@ with right:
             st.subheader(t("cutting_plane"))
             field_opts = [t("field_p"), t("field_u"), t("field_mesh")]
             field_map = {t("field_p"): "p", t("field_u"): "U", t("field_mesh"): "mesh"}
-            if sim.get("parameters", {}).get("case_type") == "dispersion":
+            if sim.get("parameters", {}).get("gas_les"):
+                # Compressible 2-species stage: concentration = GAS mass fraction
+                field_opts.insert(2, t("field_c"))
+                field_map[t("field_c")] = "GAS"
+                field_opts.insert(3, t("field_t"))
+                field_map[t("field_t")] = "T"
+            elif sim.get("parameters", {}).get("case_type") == "dispersion":
                 field_opts.insert(2, t("field_c"))
                 field_map[t("field_c")] = "T"
             field = st.selectbox(t("field"), field_opts, key="field_select")
@@ -943,6 +1020,8 @@ with right:
                     t("anim_plane_p"): ("plane", "p"),
                     t("anim_stream"):  ("streamlines", "U"),
                 }
+                if sim.get("parameters", {}).get("gas_les"):
+                    anim_map[t("anim_plane_c")] = ("plane", "GAS")
                 anim_sel = st.selectbox(t("anim_kind"), list(anim_map.keys()), key="anim_kind")
                 anim_kind, anim_field = anim_map[anim_sel]
                 anim_cache_key = f"anim_{sim_id}_{anim_kind}_{anim_field}"

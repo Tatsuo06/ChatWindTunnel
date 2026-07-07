@@ -1,6 +1,14 @@
 # 実装指示書: ガス拡散解析(浮力考慮・Boussinesq)の追加
 
-状態: **Phase A 実装完了・検証済み**(2026-07-07)。Phase B(LES拡散+濃度動画+チャットツール)は未着手。
+状態: **Phase A(定常Boussinesq拡散)実装完了・検証済み**(2026-07-07)。
+**Phase C(圧縮性多成分・空力LES→ガス拡散LESリスタート)実装完了・検証済み**(2026-07-07)— 当初計画のPhase B(Boussinesq LES)はPhase Cで置き換え(密度比の制限なし)。
+
+## Phase C 実装概要(rhoReactingBuoyantFoam)
+- 完了した空力LES(kOmegaSSTDDES/IDDES)の瞬間場から `rhoReactingBuoyantFoam`(2成分 air/GAS・化学反応オフ)へリスタート。U/k/omega/nut を継承、p/phi は破棄して一様絶対圧から再発達
+- GAS分子量 = 密度比 × 28.96(デフォルト水素0.07)。密度は組成から直接計算されるためBoussinesq近似の制限なし
+- テンプレート `foam_templates/gasFiles/`。UI: RunタブのDONEなLESケースに「🧪 ガス拡散LESへ移行」
+- 実装時に踏んだOpenFOAM側の要求: rhoReactionThermo系(heRhoThermo)必須 / reactionsのelementsは辞書不可 / air初期質量分率の明示 / fvSchemesにfluxRequired p_rgh
+- V1制約: ガス段のforceCoeffsなし、実行時に既存postProcessingはpostProcessing_aeroへアーカイブ、ガス段の再実行・延長は未対応
 
 ## 背景・目的
 

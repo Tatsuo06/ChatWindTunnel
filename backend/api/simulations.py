@@ -54,8 +54,8 @@ DEFAULT_PARAMETERS = {
     "turbulence_model": "kOmegaSST",
     # Analysis type: "aero" (wind loads) | "dispersion" (buoyant gas, Boussinesq)
     "case_type": "aero",
-    # Gas dispersion settings (used only when case_type == "dispersion")
-    "gas_density_ratio": 1.5,   # rho_gas / rho_air (CO2 ~ 1.53); beta = 1 - ratio
+    # Gas dispersion settings (dispersion cases and gas-LES restarts)
+    "gas_density_ratio": 0.07,  # rho_gas / rho_air — default hydrogen (H2 ~ 0.07)
     "source_position": None,    # [x, y, z]; None = auto (top centre of rotated geometry)
     "source_rate": 1.0,         # relative emission strength
 }

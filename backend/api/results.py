@@ -270,6 +270,8 @@ async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
         info["peak_memory_snappy_kb"] = peak_mem["snappyHexMesh"]
     if peak_mem.get("pisoFoam") is not None:
         info["peak_memory_piso_kb"] = peak_mem["pisoFoam"]
+    if peak_mem.get("gasLES") is not None:
+        info["peak_memory_gas_kb"] = peak_mem["gasLES"]
 
     # Per-stage wall-clock times (mesh generation, Phase 1 RAS, Phase 2 LES)
     info.update(parse_phase_times(case_dir))
@@ -317,8 +319,8 @@ async def animation(sim_id: int, kind: str = "plane", field: str = "U",
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
     if kind not in ("plane", "streamlines"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="kind must be plane or streamlines")
-    if field not in ("p", "U"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="field must be p or U")
+    if field not in ("p", "U", "T", "GAS"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="field must be p, U, T or GAS")
 
     case_dir = Path(sim.case_dir)
     out_name = f"plane_{field}.mp4" if kind == "plane" else "streamlines.mp4"

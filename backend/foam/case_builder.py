@@ -22,6 +22,8 @@ LES_FILES_KOSST = settings.TEMPLATES_DIR / "lesFiles_kOmegaSST"
 LES_RESTART_MODELS = ("kOmegaSSTDDES", "kOmegaSSTIDDES")
 # Buoyant gas dispersion (Boussinesq, T = normalized concentration)
 DISPERSION_TEMPLATE = settings.TEMPLATES_DIR / "dispersion"
+# Compressible 2-species gas-dispersion LES restart (rhoReactingBuoyantFoam)
+GAS_FILES = settings.TEMPLATES_DIR / "gasFiles"
 
 # ---------------------------------------------------------------------------
 # Custom Allrun scripts (replace template Allrun that copies motorBike.obj.gz)
@@ -205,6 +207,68 @@ _ALLRUN_RESTART = textwrap.dedent("""\
     rm -f log.mem_monitor.tmp
 
     runApplication reconstructPar -latestTime
+""")
+
+_ALLRUN_GAS_RESTART = textwrap.dedent("""\
+    #!/bin/sh
+    cd "${0%/*}" || exit
+    . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+    # === Gas-dispersion LES restart from a finished aero LES solution ===
+    # rhoReactingBuoyantFoam (2 species, chemistry off) is seeded from the
+    # aero LES instantaneous field: U/k/omega/nut carry over; kinematic p and
+    # volumetric phi are replaced by uniform absolute-pressure fields.
+    GAS_PREV=$(ls processor0 | grep -E "^[0-9]+(\\.[0-9]+)?$" | sort -g | tail -1)
+    if [ -z "$GAS_PREV" ] || [ "$GAS_PREV" = "0" ]; then
+        echo "ERROR: no written LES solution in processor dirs (latest time: '${GAS_PREV}')" >&2
+        exit 1
+    fi
+
+    # The gas stage reuses the same time range as the aero LES, so archive the
+    # aero postProcessing before the function objects start writing
+    [ -d postProcessing ] && mv postProcessing postProcessing_aero
+
+    # Aero LES solution -> gas time 0, drop all other time dirs and the fields
+    # that don't survive the incompressible->compressible transition
+    ls -d processor* | xargs -I {} sh -c 'cp -r {}/'"$GAS_PREV"' {}/0_gas; for t in $(ls {} | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf {}/$t; done; mv {}/0_gas {}/0; rm -rf {}/0/uniform; rm -f {}/0/p {}/0/phi'
+
+    # Overlay the uniform compressible fields (T, absolute p, p_rgh, species, alphat)
+    for f in gas0/*; do
+        ls -d processor* | xargs -I {} cp "$f" {}/0/
+    done
+
+    # Drop reconstructed time dirs at the case root for the same reason
+    for t in $(ls . | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf "./$t"; done
+
+    # Swap in the gas-stage configs prepared by build_gas_les_restart_case
+    cp -f system/controlDict.gas   system/controlDict
+    cp -f system/fvSchemes.gas     system/fvSchemes
+    cp -f system/fvSolution.gas    system/fvSolution
+    cp -f constant/turbulenceProperties.gas  constant/turbulenceProperties
+
+    rm -f log.rhoReactingBuoyantFoam log.reconstructParMesh log.reconstructPar log.foamToVTK log.postProcess
+
+    (
+        while true; do
+            ps aux | grep "[r]hoReactingBuoyantFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_gas.tmp
+            sleep 5
+        done
+    ) &
+    _MON_GAS=$!
+    runParallel rhoReactingBuoyantFoam
+    kill $_MON_GAS 2>/dev/null
+    if [ -s log.mem_gas.tmp ]; then
+        peak=$(sort -n log.mem_gas.tmp | tail -1)
+        echo "Peak RSS (all rhoReactingBuoyantFoam processes): ${peak} kB" > log.mem_gas
+    fi
+    rm -f log.mem_gas.tmp
+
+    runApplication reconstructParMesh -constant
+    runApplication reconstructPar
+
+    # Surface mesh (Mesh tab) and y=0 cutting plane of the gas field (Visualization tab)
+    runApplication foamToVTK -no-internal -latestTime -fields '()'
+    runApplication postProcess -func cuttingPlane -latestTime
 """)
 
 _ALLRUN_LES_RESTART = textwrap.dedent("""\
@@ -417,6 +481,104 @@ def build_les_restart_case(case_dir: Path, params: dict) -> Path:
 
     allrun = case_dir / "Allrun"
     allrun.write_text(_ALLRUN_LES_RESTART)
+    allrun.chmod(0o755)
+
+    return case_dir
+
+
+def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
+    """Convert a finished aero LES case for a gas-dispersion LES restart.
+
+    Runs rhoReactingBuoyantFoam (compressible, 2 species air/GAS, chemistry
+    off) seeded from the aero LES instantaneous field: U/k/omega/nut carry
+    over; kinematic p and volumetric phi are discarded and replaced by
+    uniform absolute-pressure fields (pressure redevelops in a few steps
+    while the turbulent velocity field is preserved). Buoyancy comes from
+    the GAS molecular weight = gas_density_ratio x air.
+    """
+    gas_model = params.get("gas_model") or params.get("les_model", "kOmegaSSTDDES")
+    if gas_model not in LES_RESTART_MODELS:
+        raise ValueError(f"gas_model must be one of {LES_RESTART_MODELS}, got {gas_model!r}")
+
+    gas_end = float(params.get("gas_end_time", 0.7))
+    gas_dt = float(params.get("gas_delta_t", 1e-4))
+    ratio = float(params.get("gas_density_ratio", 0.07))
+    n_steps = max(1, round(gas_end / gas_dt))
+    # Phase-time semantics for the shared writers (streamLines/cuttingPlane
+    # intervals, animation t_max): the gas stage is now "the" LES stage
+    stage_params = {**params, "les_end_time": gas_end, "les_delta_t": gas_dt}
+
+    # --- swapped-in solver configs (.gas suffix; Allrun activates them) ---
+    ctrl = (GAS_FILES / "controlDict").read_text()
+    ctrl = _set_value(ctrl, "endTime", str(gas_end))
+    ctrl = _set_value(ctrl, "deltaT", str(gas_dt))
+    ctrl = _set_value(ctrl, "writeInterval", str(min(1000, n_steps)))
+    (case_dir / "system" / "controlDict.gas").write_text(ctrl)
+    for fname in ("fvSchemes", "fvSolution"):
+        shutil.copy2(GAS_FILES / fname, case_dir / "system" / f"{fname}.gas")
+    tp_src = GAS_FILES / ("turbulenceProperties.IDDES" if gas_model == "kOmegaSSTIDDES"
+                          else "turbulenceProperties")
+    tp = _set_value(tp_src.read_text(), "LESModel", gas_model)
+    (case_dir / "constant" / "turbulenceProperties.gas").write_text(tp)
+
+    # --- new constant files (only read by the gas solver) ---
+    for fname in ("thermophysicalProperties", "reactions", "chemistryProperties",
+                  "combustionProperties", "g"):
+        shutil.copy2(GAS_FILES / fname, case_dir / "constant" / fname)
+    mol_weight = round(28.96 * ratio, 4)
+    thermo = (GAS_FILES / "thermo.compressibleGas").read_text()
+    thermo = thermo.replace("molWeight       2.03;", f"molWeight       {mol_weight};")
+    (case_dir / "constant" / "thermo.compressibleGas").write_text(thermo)
+
+    # Release source: mass + species injected together (mass-consistent)
+    rotated_stl = case_dir / "constant" / "triSurface" / "motorBike.stl"
+    source = params.get("source_position") or _auto_source_position(rotated_stl)
+    rate = float(params.get("source_rate", 1.0))
+    fv = (GAS_FILES / "fvOptions").read_text()
+    fv = fv.replace("(0.0 0.0 1.0)", f"({source[0]} {source[1]} {source[2]})")
+    fv = fv.replace("rho         (1.0 0);", f"rho         ({rate} 0);")
+    fv = fv.replace("GAS         (1.0 0);", f"GAS         ({rate} 0);")
+    (case_dir / "constant" / "fvOptions").write_text(fv)
+
+    # --- uniform initial fields overlaid onto each processor's time 0 ---
+    gas0 = case_dir / "gas0"
+    if gas0.exists():
+        shutil.rmtree(gas0)
+    shutil.copytree(GAS_FILES / "0field", gas0)
+
+    # Animation frames: cuttingPlane samples ( p U T GAS ), streamLines timeStep
+    _write_anim_cutting_plane(case_dir, stage_params)
+    cp_path = case_dir / "system" / "cuttingPlane"
+    cp_path.write_text(cp_path.read_text().replace("fields          ( p U );",
+                                                   "fields          ( p U T GAS );"))
+    _write_streamlines(case_dir, stage_params, solver_type=SimulatorType.unsteady)
+
+    # Fresh postProcessing for the gas stage (the aero LES output is archived
+    # by the Allrun on the machine that runs the job); locally drop the frame
+    # dirs so latest-time pickers can't mix aero and gas times
+    for sub in ("cuttingPlane", "sets/streamLines", "sets/streamLinesBack"):
+        d = case_dir / "postProcessing" / sub
+        if d.exists():
+            shutil.rmtree(d)
+
+    # case_params.json: gas parameters + resolved source (t_max filter reads les_end_time)
+    params_file = case_dir / "case_params.json"
+    merged = json.loads(params_file.read_text()) if params_file.exists() else {}
+    merged.update({
+        "gas_les": True,
+        "gas_end_time": gas_end,
+        "gas_delta_t": gas_dt,
+        "gas_model": gas_model,
+        "gas_density_ratio": ratio,
+        "source_position": source,
+        "source_rate": rate,
+        "les_end_time": gas_end,
+        "les_delta_t": gas_dt,
+    })
+    params_file.write_text(json.dumps(merged, indent=2))
+
+    allrun = case_dir / "Allrun"
+    allrun.write_text(_ALLRUN_GAS_RESTART)
     allrun.chmod(0o755)
 
     return case_dir
@@ -661,6 +823,19 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
     }
 
 
+def _auto_source_position(rotated_stl: Path) -> list:
+    """Default release point: top centre of the rotated geometry, slightly
+    above the surface so the source cells sit in the fluid region."""
+    from stl import mesh as stl_mesh
+
+    m = stl_mesh.Mesh.from_file(str(rotated_stl))
+    pts = m.vectors.reshape(-1, 3)
+    x0, x1 = float(pts[:, 0].min()), float(pts[:, 0].max())
+    z1 = float(pts[:, 2].max())
+    dz = z1 - float(pts[:, 2].min())
+    return [round((x0 + x1) / 2, 3), 0.0, round(z1 + 0.05 * max(dz, 0.1), 3)]
+
+
 def _write_dispersion_props(case_dir: Path, params: dict, rotated_stl: Path) -> dict:
     """Write gas-dispersion settings: buoyancy beta and the release source.
 
@@ -670,22 +845,12 @@ def _write_dispersion_props(case_dir: Path, params: dict, rotated_stl: Path) -> 
     """
     from stl import mesh as stl_mesh
 
-    ratio = float(params.get("gas_density_ratio", 1.5))
+    ratio = float(params.get("gas_density_ratio", 0.07))
     beta = round(1.0 - ratio, 6)
     tp_path = case_dir / "constant" / "transportProperties"
     tp_path.write_text(_set_value(tp_path.read_text(), "beta", str(beta)))
 
-    source = params.get("source_position")
-    if not source:
-        # Default release point: top centre of the rotated geometry, slightly
-        # above the surface so the source cells sit in the fluid region
-        m = stl_mesh.Mesh.from_file(str(rotated_stl))
-        pts = m.vectors.reshape(-1, 3)
-        x0, x1 = float(pts[:, 0].min()), float(pts[:, 0].max())
-        z1 = float(pts[:, 2].max())
-        dz = z1 - float(pts[:, 2].min())
-        source = [round((x0 + x1) / 2, 3), 0.0, round(z1 + 0.05 * max(dz, 0.1), 3)]
-
+    source = params.get("source_position") or _auto_source_position(rotated_stl)
     rate = float(params.get("source_rate", 1.0))
     fv_path = case_dir / "constant" / "fvOptions"
     content = fv_path.read_text()
