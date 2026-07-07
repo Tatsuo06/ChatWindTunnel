@@ -6,21 +6,35 @@ import pandas as pd
 
 from backend.db.models import SimulatorType
 
+# Candidate log names per phase, in priority order. Aero cases use
+# simpleFoam/pisoFoam; buoyant gas-dispersion cases use the Boussinesq solvers.
+PHASE1_LOGS = ("log.simpleFoam", "log.buoyantBoussinesqSimpleFoam")
+PHASE2_LOGS = ("log.pisoFoam", "log.buoyantBoussinesqPimpleFoam")
+
+
+def _first_existing_log(case_dir: Path, names: tuple) -> Path:
+    """First existing log among names; falls back to the canonical (first) name."""
+    for name in names:
+        p = case_dir / name
+        if p.exists():
+            return p
+    return case_dir / names[0]
+
 
 def phase_logs(case_dir: Path, solver_type: SimulatorType) -> list[dict]:
     """Return the solver log(s) for a case, one entry per execution phase.
 
-    UNSTEADY cases run Phase 1 (RAS/simpleFoam, time unit = iteration) followed
-    by Phase 2 (LES/pisoFoam, time unit = seconds) — the two logs have
-    incompatible Time axes and must never be concatenated/compared directly.
+    UNSTEADY cases run Phase 1 (RAS, time unit = iteration) followed by
+    Phase 2 (LES, time unit = seconds) — the two logs have incompatible
+    Time axes and must never be concatenated/compared directly.
     """
     if solver_type == SimulatorType.unsteady:
         return [
-            {"phase": 1, "label": "Phase 1 (RAS)", "log": case_dir / "log.simpleFoam", "unit": "iteration"},
-            {"phase": 2, "label": "Phase 2 (LES)", "log": case_dir / "log.pisoFoam", "unit": "s"},
+            {"phase": 1, "label": "Phase 1 (RAS)", "log": _first_existing_log(case_dir, PHASE1_LOGS), "unit": "iteration"},
+            {"phase": 2, "label": "Phase 2 (LES)", "log": _first_existing_log(case_dir, PHASE2_LOGS), "unit": "s"},
         ]
     return [
-        {"phase": 1, "label": "main", "log": case_dir / "log.simpleFoam", "unit": "iteration"},
+        {"phase": 1, "label": "main", "log": _first_existing_log(case_dir, PHASE1_LOGS), "unit": "iteration"},
     ]
 
 
@@ -180,8 +194,8 @@ def parse_phase_times(case_dir: Path) -> dict:
 
     return {
         "mesh_s": mesh_s,
-        "phase1_s": _final_clock_time(case_dir / "log.simpleFoam"),
-        "phase2_s": _final_clock_time(case_dir / "log.pisoFoam"),
+        "phase1_s": _final_clock_time(_first_existing_log(case_dir, PHASE1_LOGS)),
+        "phase2_s": _final_clock_time(_first_existing_log(case_dir, PHASE2_LOGS)),
     }
 
 
@@ -204,7 +218,7 @@ def parse_solver_diagnostics(case_dir: Path, log_override: Path | None = None) -
             return {}
         # Prefer the main solver log (simpleFoam / pisoFoam) over potentialFoam
         log = None
-        for name in ("log.simpleFoam", "log.pisoFoam", "log.icoFoam", "log.buoyantSimpleFoam"):
+        for name in (*PHASE1_LOGS, *PHASE2_LOGS, "log.icoFoam", "log.buoyantSimpleFoam"):
             candidate = case_dir / name
             if candidate.exists():
                 log = candidate

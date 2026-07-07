@@ -52,6 +52,12 @@ DEFAULT_PARAMETERS = {
     "refinement_max": 6,
     # Turbulence model
     "turbulence_model": "kOmegaSST",
+    # Analysis type: "aero" (wind loads) | "dispersion" (buoyant gas, Boussinesq)
+    "case_type": "aero",
+    # Gas dispersion settings (used only when case_type == "dispersion")
+    "gas_density_ratio": 1.5,   # rho_gas / rho_air (CO2 ~ 1.53); beta = 1 - ratio
+    "source_position": None,    # [x, y, z]; None = auto (top centre of rotated geometry)
+    "source_rate": 1.0,         # relative emission strength
 }
 
 
@@ -171,7 +177,9 @@ async def sync_one_job(sim_id: int, current_user: CurrentUser, db: DB):
         if new_status == SimulationStatus.done and sim.case_dir:
             from backend.cluster.cluster_runner import _ssh as _cluster_ssh
             remote_dir = runner._remote_dir(Path(sim.case_dir))
-            solver_log = "log.simpleFoam" if sim.solver_type == SimulatorType.steady else "log.pisoFoam"
+            from backend.api.jobs import _phase_log_names
+            _p1, _p2 = _phase_log_names(sim.parameters or {})
+            solver_log = _p1 if sim.solver_type == SimulatorType.steady else _p2
             check_out, _ = _cluster_ssh(f"test -f {remote_dir}/{solver_log} && echo yes || echo no")
             if check_out.strip() != "yes":
                 return {"sim_id": sim_id, "result": "error",
@@ -235,7 +243,9 @@ async def sync_cluster_jobs(current_user: CurrentUser, db: DB):
             if new_status == SimulationStatus.done and sim.case_dir:
                 from backend.cluster.cluster_runner import _ssh as _cluster_ssh
                 remote_dir = runner._remote_dir(Path(sim.case_dir))
-                solver_log = "log.simpleFoam" if sim.solver_type == SimulatorType.steady else "log.pisoFoam"
+                from backend.api.jobs import _phase_log_names
+                _p1, _p2 = _phase_log_names(sim.parameters or {})
+                solver_log = _p1 if sim.solver_type == SimulatorType.steady else _p2
                 check_out, _ = _cluster_ssh(f"test -f {remote_dir}/{solver_log} && echo yes || echo no")
                 if check_out.strip() != "yes":
                     errors.append({"sim_id": sim.id, "error": f"qstat=DONE but {solver_log} missing on cluster — skipped"})

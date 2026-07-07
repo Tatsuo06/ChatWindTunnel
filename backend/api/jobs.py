@@ -128,6 +128,17 @@ async def poll_status(sim_id: int, current_user: CurrentUser, db: DB):
     return JobStatusResponse(sim_id=sim.id, status=sim.status, job_id=sim.job_id)
 
 
+def _phase_log_names(params: dict) -> tuple[str, str]:
+    """(phase1, phase2) solver log names — Boussinesq solvers for dispersion cases.
+
+    Parameter-based (not file-existence-based) because progress polling tails
+    logs on the cluster where local existence checks don't apply.
+    """
+    if params.get("case_type") == "dispersion":
+        return "log.buoyantBoussinesqSimpleFoam", "log.buoyantBoussinesqPimpleFoam"
+    return "log.simpleFoam", "log.pisoFoam"
+
+
 def _tail_log_text(runner, case_dir: Path, log_name: str) -> str:
     if isinstance(runner, ClusterRunner):
         from backend.cluster.cluster_runner import _ssh
@@ -154,18 +165,19 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
 
     case_dir = Path(sim.case_dir)
     runner = get_runner()
+    phase1_log, phase2_log = _phase_log_names(sim.parameters)
 
     if sim.solver_type == SimulatorType.unsteady:
-        # Phase 2 (LES/pisoFoam) takes over from Phase 1 (RAS/simpleFoam) partway through
-        # the Allrun script; report whichever phase has actually produced output so far.
-        text = _tail_log_text(runner, case_dir, "log.pisoFoam")
+        # Phase 2 (LES) takes over from Phase 1 (RAS) partway through the
+        # Allrun script; report whichever phase has actually produced output so far.
+        text = _tail_log_text(runner, case_dir, phase2_log)
         times = _re.findall(r"^Time = ([\d.e+\-]+)", text, _re.MULTILINE)
         if times:
-            log_name = "log.pisoFoam"
+            log_name = phase2_log
             end_time = float(sim.parameters.get("les_end_time", 0.7))
             phase = 2
         else:
-            log_name = "log.simpleFoam"
+            log_name = phase1_log
             end_time = float(sim.parameters.get("end_time", 500))
             phase = 1
             text = _tail_log_text(runner, case_dir, log_name)
@@ -185,7 +197,7 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
             "phase": phase,
         }
 
-    log_name = "log.simpleFoam"
+    log_name = phase1_log
     end_time = float(sim.parameters.get("end_time", 500))
     text = _tail_log_text(runner, case_dir, log_name)
 

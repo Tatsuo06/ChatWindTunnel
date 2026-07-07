@@ -1,0 +1,55 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   A nd           | Website:  www.openfoam.com                      |
+|   \\  /    O peration     | Version:  v2206                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      T;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// T is used as a normalized gas concentration C (0 = fresh air).
+// Buoyancy comes from beta = 1 - rho_gas/rho_air in transportProperties.
+
+dimensions      [0 0 0 1 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    #includeEtc "caseDicts/setConstraintTypes"
+
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 0;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 0;
+        value           $internalField;
+    }
+
+    lowerWall
+    {
+        type            zeroGradient;
+    }
+
+    motorBikeGroup
+    {
+        type            zeroGradient;
+    }
+
+    #include "include/frontBackUpperPatches"
+}
+
+
+// ************************************************************************* //

@@ -20,6 +20,8 @@ LES_FILES = settings.TEMPLATES_DIR / "motorBike_LES" / "lesFiles"
 # kOmegaSST-based DES configs for restarting a converged steady case as LES
 LES_FILES_KOSST = settings.TEMPLATES_DIR / "lesFiles_kOmegaSST"
 LES_RESTART_MODELS = ("kOmegaSSTDDES", "kOmegaSSTIDDES")
+# Buoyant gas dispersion (Boussinesq, T = normalized concentration)
+DISPERSION_TEMPLATE = settings.TEMPLATES_DIR / "dispersion"
 
 # ---------------------------------------------------------------------------
 # Custom Allrun scripts (replace template Allrun that copies motorBike.obj.gz)
@@ -280,7 +282,11 @@ def build_case(
     if case_dir.exists():
         shutil.rmtree(case_dir)
 
-    template = STEADY_TEMPLATE if solver_type == SimulatorType.steady else UNSTEADY_TEMPLATE
+    is_dispersion = params.get("case_type") == "dispersion"
+    if solver_type == SimulatorType.steady:
+        template = DISPERSION_TEMPLATE if is_dispersion else STEADY_TEMPLATE
+    else:
+        template = UNSTEADY_TEMPLATE
     shutil.copytree(template, case_dir)
 
     # Place geometry — keep name "motorBike" so BC files stay valid
@@ -312,7 +318,7 @@ def build_case(
     _write_surface_feature_extract(case_dir)
     _write_streamlines(case_dir, params, solver_type=solver_type)
 
-    if solver_type == SimulatorType.steady:
+    if solver_type == SimulatorType.steady and not is_dispersion:
         turb_model = params.get("turbulence_model", "kOmegaSST")
         if turb_model == "SpalartAllmaras":
             _apply_spalart_allmaras(case_dir)
@@ -320,6 +326,9 @@ def build_case(
             _apply_kepsilon(case_dir, "realizableKE")
         elif turb_model == "laminar":
             _apply_laminar(case_dir)
+
+    if is_dispersion and solver_type == SimulatorType.steady:
+        params = _write_dispersion_props(case_dir, params, target_stl)
 
     # Empty .foam file required by pyvista.OpenFOAMReader
     (case_dir / "case.foam").touch()
@@ -334,6 +343,12 @@ def build_case(
     # Replace Allrun with our custom version
     allrun = case_dir / "Allrun"
     script = _ALLRUN_LES if solver_type == SimulatorType.unsteady else _ALLRUN_STEADY
+    if is_dispersion and solver_type == SimulatorType.steady:
+        # The memory monitor's ps-grep is solver-name-based; the label text is
+        # free-form (parse_peak_memory only reads the kB number)
+        script = (script
+                  .replace('"[s]impleFoam"', '"[b]uoyantBoussinesqSimpleFoam"')
+                  .replace("all simpleFoam processes", "all buoyantBoussinesqSimpleFoam processes"))
     allrun.write_text(script)
     allrun.chmod(0o755)
 
@@ -644,6 +659,41 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
         "streamline_radius":   round(max(W, H) / 2 * 1.1, 3),
         "streamline_n_points": 50,
     }
+
+
+def _write_dispersion_props(case_dir: Path, params: dict, rotated_stl: Path) -> dict:
+    """Write gas-dispersion settings: buoyancy beta and the release source.
+
+    beta = 1 - rho_gas/rho_air maps the normalized concentration (T field)
+    to Boussinesq buoyancy: ratio > 1 (heavy gas) gives beta < 0 (sinks).
+    Returns params with the resolved source_position (for case_params.json).
+    """
+    from stl import mesh as stl_mesh
+
+    ratio = float(params.get("gas_density_ratio", 1.5))
+    beta = round(1.0 - ratio, 6)
+    tp_path = case_dir / "constant" / "transportProperties"
+    tp_path.write_text(_set_value(tp_path.read_text(), "beta", str(beta)))
+
+    source = params.get("source_position")
+    if not source:
+        # Default release point: top centre of the rotated geometry, slightly
+        # above the surface so the source cells sit in the fluid region
+        m = stl_mesh.Mesh.from_file(str(rotated_stl))
+        pts = m.vectors.reshape(-1, 3)
+        x0, x1 = float(pts[:, 0].min()), float(pts[:, 0].max())
+        z1 = float(pts[:, 2].max())
+        dz = z1 - float(pts[:, 2].min())
+        source = [round((x0 + x1) / 2, 3), 0.0, round(z1 + 0.05 * max(dz, 0.1), 3)]
+
+    rate = float(params.get("source_rate", 1.0))
+    fv_path = case_dir / "constant" / "fvOptions"
+    content = fv_path.read_text()
+    content = content.replace("(0.0 0.0 1.0)", f"({source[0]} {source[1]} {source[2]})")
+    content = content.replace("T           (1.0 0);", f"T           ({rate} 0);")
+    fv_path.write_text(content)
+
+    return {**params, "source_position": source}
 
 
 def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:

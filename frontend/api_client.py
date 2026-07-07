@@ -158,8 +158,12 @@ def list_simulations(geo_id: int) -> list[dict]:
     return r.json() if r.ok else []
 
 
-def create_simulation(geo_id: int, name: str, solver_type: str) -> dict | None:
-    r = _post("/simulations", json={"geometry_id": geo_id, "name": name, "solver_type": solver_type})
+def create_simulation(geo_id: int, name: str, solver_type: str,
+                      parameters: dict | None = None) -> dict | None:
+    body = {"geometry_id": geo_id, "name": name, "solver_type": solver_type}
+    if parameters:
+        body["parameters"] = parameters
+    r = _post("/simulations", json=body)
     return r.json() if r.ok else None
 
 

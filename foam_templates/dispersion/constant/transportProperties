@@ -1,0 +1,36 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2206                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      transportProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+transportModel  Newtonian;
+
+nu              1.5e-05;
+
+// Boussinesq buoyancy for gas concentration: T is normalized concentration.
+// The coefficient below is 1 - rho_gas/rho_air, rewritten by case_builder
+// from gas_density_ratio (negative value = heavier than air, sinks).
+// NOTE: keep the word "b e t a" out of comments — case_builder's _set_value
+// rewrites the first occurrence of the key token in this file.
+beta            -0.5;
+
+TRef            0;
+
+// Molecular and turbulent Schmidt numbers (Pr fields reused for the scalar)
+Pr              1.0;
+
+Prt             0.85;
+
+
+// ************************************************************************* //

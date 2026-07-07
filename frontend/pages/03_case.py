@@ -247,9 +247,15 @@ with left:
     with st.expander(t("new_case"), expanded=not sims):
         with st.form("new_sim_form"):
             sim_name = st.text_input(t("case_name"))
+            case_type_sel = st.selectbox(
+                t("case_type_label"),
+                [t("case_type_aero"), t("case_type_dispersion")],
+            )
             # All cases start steady; switch to LES afterwards via Run-tab restart
             if st.form_submit_button(t("create"), width="stretch"):
-                result = api.create_simulation(geo_id, sim_name, "STEADY")
+                case_type = "dispersion" if case_type_sel == t("case_type_dispersion") else "aero"
+                result = api.create_simulation(geo_id, sim_name, "STEADY",
+                                               parameters={"case_type": case_type})
                 if result:
                     st.session_state["sim_id"] = result["id"]
                     st.rerun()
@@ -468,6 +474,50 @@ with right:
         with col4:
             roll  = st.number_input(t("roll_angle"),  value=float(sim.get("roll_deg", 0.0)),  step=5.0)
 
+        # ── Gas dispersion settings (dispersion cases only) ─────────
+        gas_updates = {}
+        if sim.get("parameters", {}).get("case_type") == "dispersion":
+            _gp = sim.get("parameters", {})
+            st.markdown(f"#### {t('gas_settings')}")
+            st.caption(t("boussinesq_note"))
+            _presets = {t("gas_preset_co2"): 1.53, t("gas_preset_methane"): 0.55,
+                        t("gas_preset_hydrogen"): 0.07, t("gas_preset_custom"): None}
+            gcol1, gcol2, gcol3 = st.columns(3)
+            with gcol1:
+                preset_sel = st.selectbox(t("gas_preset"), list(_presets.keys()), index=3)
+            with gcol2:
+                _preset_ratio = _presets[preset_sel]
+                ratio = st.number_input(
+                    t("gas_density_ratio"),
+                    value=float(_preset_ratio if _preset_ratio is not None
+                                else _gp.get("gas_density_ratio", 1.5)),
+                    min_value=0.01, step=0.1, format="%.2f",
+                    disabled=_preset_ratio is not None,
+                )
+                if _preset_ratio is not None:
+                    ratio = _preset_ratio
+            with gcol3:
+                rate = st.number_input(
+                    t("source_rate"),
+                    value=float(_gp.get("source_rate", 1.0)),
+                    min_value=0.0, step=0.5,
+                )
+            auto_src = st.checkbox(t("source_auto"),
+                                   value=_gp.get("source_position") is None)
+            src_pos = None
+            if not auto_src:
+                _sp = _gp.get("source_position") or [0.0, 0.0, 1.0]
+                scol1, scol2, scol3 = st.columns(3)
+                with scol1:
+                    sx = st.number_input(t("source_x"), value=float(_sp[0]), step=0.1, format="%.3f")
+                with scol2:
+                    sy = st.number_input(t("source_y"), value=float(_sp[1]), step=0.1, format="%.3f")
+                with scol3:
+                    sz = st.number_input(t("source_z"), value=float(_sp[2]), step=0.1, format="%.3f")
+                src_pos = [sx, sy, sz]
+            gas_updates = {"gas_density_ratio": ratio, "source_rate": rate,
+                           "source_position": src_pos}
+
         if geo and geo.get("stl_file_path"):
             bbox = api.get_geometry_bbox(geo_id)
             if bbox:
@@ -481,7 +531,7 @@ with right:
                 st.caption(f"Re = {re_b:,.0f}  (U = {velocity} m/s, L = {lref_b:.3f} m, ν = {nu_b:.2g} m²/s)")
 
         if st.button(t("save_settings")):
-            params = {**sim.get("parameters", {}), "velocity_mps": velocity}
+            params = {**sim.get("parameters", {}), "velocity_mps": velocity, **gas_updates}
             result = api.update_simulation(sim_id, yaw_deg=yaw, pitch_deg=pitch, roll_deg=roll, parameters=params)
             if result:
                 st.success(t("settings_saved", velocity, yaw, pitch))
@@ -726,8 +776,12 @@ with right:
         else:
             st.subheader(t("cutting_plane"))
             field_opts = [t("field_p"), t("field_u"), t("field_mesh")]
+            field_map = {t("field_p"): "p", t("field_u"): "U", t("field_mesh"): "mesh"}
+            if sim.get("parameters", {}).get("case_type") == "dispersion":
+                field_opts.insert(2, t("field_c"))
+                field_map[t("field_c")] = "T"
             field = st.selectbox(t("field"), field_opts, key="field_select")
-            field_key = "p" if field == t("field_p") else ("mesh" if field == t("field_mesh") else "U")
+            field_key = field_map[field]
             img = api.get_cutting_plane_plot(sim_id, field=field_key)
             if img:
                 st.image(img, width="stretch")

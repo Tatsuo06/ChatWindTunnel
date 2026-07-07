@@ -170,7 +170,9 @@ async def residuals(sim_id: int, current_user: CurrentUser, db: DB, phase: int |
         log = matches[0] if matches and matches[0].exists() else None
     else:
         # Prefer main solver logs over auxiliary ones (potentialFoam, etc.)
-        for solver in ("simpleFoam", "pisoFoam", "rhoSimpleFoam"):
+        for solver in ("simpleFoam", "pisoFoam",
+                       "buoyantBoussinesqSimpleFoam", "buoyantBoussinesqPimpleFoam",
+                       "rhoSimpleFoam"):
             log = case_dir / f"log.{solver}"
             if log.exists():
                 break

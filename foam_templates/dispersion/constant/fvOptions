@@ -1,0 +1,41 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   A nd           | Website:  www.openfoam.com                      |
+|   \\  /    O peration     | Version:  v2206                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      fvOptions;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Gas release point: injects normalized concentration (T) at a fixed rate.
+// Point coordinates and rate are rewritten by case_builder from
+// source_position / source_rate parameters.
+gasSource
+{
+    type            scalarSemiImplicitSource;
+    active          yes;
+
+    volumeMode      absolute;
+    selectionMode   points;
+
+    points
+    (
+        (0.0 0.0 1.0)
+    );
+
+    sources
+    {
+        T           (1.0 0);
+    }
+}
+
+
+// ************************************************************************* //

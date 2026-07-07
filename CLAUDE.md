@@ -236,6 +236,14 @@ For **realizableKE**:
 - Progress/results are phase-aware: `jobs.py /progress` reports `phase` 1 or 2 (detected from `log.pisoFoam` having Time markers), `/residuals?phase=` selects the per-phase log via `parsers.phase_logs()`, and the force-coefficient chart renders each phase as its own subplot (iteration vs seconds axes).
 - Post-processing for the Mesh and Cutting-plane tabs runs at the END of the LES Allrun (steady does it inline). After `reconstructPar`, the leftover Phase-1 time directory (captured as `PHASE1_TIME` before the swap) is removed so `-latestTime` targets the LES end time, then `foamToVTK -no-internal -latestTime` (surface mesh) and `postProcess -func cuttingPlane -latestTime` (y=0 plane of the instantaneous LES field) run. The LES template therefore needs its own `system/cuttingPlane` dict (copied from the steady template). Without these steps the Mesh tab 500s and the Cutting-plane tab 404s for unsteady cases.
 
+### Gas dispersion (dispersion / buoyantBoussinesqSimpleFoam) — Phase A
+- `parameters["case_type"] = "dispersion"` selects `foam_templates/dispersion/` (steady only so far). The T field is a **normalized gas concentration**; Boussinesq buoyancy uses `beta = 1 - gas_density_ratio` (rewritten by `case_builder._write_dispersion_props`; negative = heavier than air, sinks). Validity: |Δρ|/ρ ≲ 0.2–0.3 — hydrogen/LNG numbers are indicative only.
+- Release source: `constant/fvOptions` `scalarSemiImplicitSource` at `source_position` (None = auto: top centre of the rotated geometry + 5%) with `source_rate` (relative units — T is not bounded to 0..1 near the source).
+- ⚠️ `_set_value()` rewrites the FIRST occurrence of a key token in a file — do not use parameter words like the buoyancy coefficient's name inside comments of files it edits (this silently corrupts the entry; it bit us in transportProperties).
+- Solver log names are generalized: `parsers.PHASE1_LOGS/PHASE2_LOGS` + `_first_existing_log()` (file-based, for local parsing) and `jobs._phase_log_names()` (parameter-based, for remote progress tails). The steady Allrun's memory-monitor grep is solver-name-specific and gets rewritten for dispersion cases.
+- UI: analysis type chosen at case creation; gas settings (preset/density ratio/release point/rate) in the Setup tab; the cutting-plane field selector gains "C (concentration)" (= T) for dispersion cases.
+- Verified: light gas (ratio 0.5) plume rises above the source, heavy gas (ratio 1.5) slumps to the ground (98% of plume mass below source height).
+
 ## Environment & Cluster
 
 - Local OpenFOAM: set `FOAM_LOCAL_APP` in `.env` to the app path (e.g. `/Applications/OpenFOAM-v2206.app`). Leave `CLUSTER_USER` empty to use the local runner. If `FOAM_LOCAL_APP` is not set or the path does not exist, a clear error is raised.

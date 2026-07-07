@@ -7,7 +7,10 @@ Phase 2 (LES/pisoFoam, seconds) rather than concatenating incompatible Time axes
 from pathlib import Path
 
 from backend.db.models import SimulatorType
-from backend.visualization.parsers import parse_force_coefficients, phase_logs
+from backend.visualization.parsers import (
+    parse_force_coefficients, phase_logs,
+    PHASE1_LOGS, _first_existing_log,
+)
 
 
 def _write_coefficient_dat(path: Path, times: list[float]) -> None:
@@ -63,3 +66,20 @@ def test_parse_force_coefficients_unsteady_splits_phases_on_time_decrease(tmp_pa
 def test_parse_force_coefficients_empty_when_no_data(tmp_path):
     df = parse_force_coefficients(tmp_path)
     assert df.empty
+
+
+def test_first_existing_log_prefers_canonical_and_falls_back(tmp_path):
+    # Nothing exists -> canonical (first) name so legacy behavior is preserved
+    assert _first_existing_log(tmp_path, PHASE1_LOGS) == tmp_path / "log.simpleFoam"
+    # Dispersion solver log present -> resolved
+    (tmp_path / "log.buoyantBoussinesqSimpleFoam").write_text("Time = 1\n")
+    assert _first_existing_log(tmp_path, PHASE1_LOGS).name == "log.buoyantBoussinesqSimpleFoam"
+    # Aero log wins when both exist (priority order)
+    (tmp_path / "log.simpleFoam").write_text("Time = 1\n")
+    assert _first_existing_log(tmp_path, PHASE1_LOGS).name == "log.simpleFoam"
+
+
+def test_phase_logs_resolves_dispersion_solver(tmp_path):
+    (tmp_path / "log.buoyantBoussinesqSimpleFoam").write_text("Time = 1\n")
+    entries = phase_logs(tmp_path, SimulatorType.steady)
+    assert entries[0]["log"].name == "log.buoyantBoussinesqSimpleFoam"
