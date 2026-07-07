@@ -201,6 +201,18 @@ def _chat_section(sim_id: int, chat_key: str, heading: str, caption: str, placeh
             st.error("Chat failed. Check that LM Studio is running.")
 
 
+def _turbulence_label(sim: dict) -> str:
+    """Human-readable turbulence model for the current case.
+
+    Unsteady cases report their LES model: the kOmegaSST DES model chosen at
+    restart (les_model), or SpalartAllmarasDDES for legacy 2-phase cases.
+    """
+    params = sim.get("parameters", {})
+    if sim.get("solver_type") == "UNSTEADY":
+        return params.get("les_model") or "SpalartAllmarasDDES"
+    return params.get("turbulence_model", "kOmegaSST")
+
+
 def _fmt_secs(sec) -> str:
     """Format seconds as 'Xh Ym Zs' (dropping leading zero units)."""
     sec = int(round(sec))
@@ -456,25 +468,6 @@ with right:
         with col4:
             roll  = st.number_input(t("roll_angle"),  value=float(sim.get("roll_deg", 0.0)),  step=5.0)
 
-        les_end_time = None
-        les_delta_t = None
-        if sim.get("solver_type") == "UNSTEADY":
-            st.markdown(f"#### {t('les_settings')}")
-            st.caption(t("les_fixed_turb_note"))
-            lcol1, lcol2 = st.columns(2)
-            with lcol1:
-                les_end_time = st.number_input(
-                    t("les_end_time"),
-                    value=float(sim.get("parameters", {}).get("les_end_time", 0.7)),
-                    min_value=0.001, step=0.1, format="%.4f",
-                )
-            with lcol2:
-                les_delta_t = st.number_input(
-                    t("les_delta_t"),
-                    value=float(sim.get("parameters", {}).get("les_delta_t", 1e-4)),
-                    min_value=1e-6, step=1e-5, format="%.6f",
-                )
-
         if geo and geo.get("stl_file_path"):
             bbox = api.get_geometry_bbox(geo_id)
             if bbox:
@@ -489,10 +482,6 @@ with right:
 
         if st.button(t("save_settings")):
             params = {**sim.get("parameters", {}), "velocity_mps": velocity}
-            if les_end_time is not None:
-                params["les_end_time"] = les_end_time
-            if les_delta_t is not None:
-                params["les_delta_t"] = les_delta_t
             result = api.update_simulation(sim_id, yaw_deg=yaw, pitch_deg=pitch, roll_deg=roll, parameters=params)
             if result:
                 st.success(t("settings_saved", velocity, yaw, pitch))
@@ -542,6 +531,7 @@ with right:
         status_color = {"PENDING": "🔵", "MESHING": "🟡", "RUNNING": "🟡",
                         "DONE": "🟢", "FAILED": "🔴"}
         st.markdown(f"{t('status_label')} {status_color.get(current_status, '')} {current_status}")
+        st.caption(f"{t('turbulence_model_label')}: `{_turbulence_label(sim)}`")
 
         if geo and not geo.get("stl_file_path"):
             st.warning(t("no_cad"))
