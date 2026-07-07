@@ -74,12 +74,14 @@ class SimulationUpdate(BaseModel):
     pitch_deg: float | None = None
     roll_deg: float | None = None
     name: str | None = None
+    description: str | None = None
 
 
 class SimulationResponse(BaseModel):
     id: int
     geometry_id: int
     name: str
+    description: str | None = ""
     solver_type: SimulatorType
     status: SimulationStatus
     yaw_deg: float
@@ -388,6 +390,8 @@ async def update_simulation(sim_id: int, body: SimulationUpdate, current_user: C
 
     if body.name is not None:
         sim.name = body.name
+    if body.description is not None:
+        sim.description = body.description
     if body.parameters is not None:
         merged = {**sim.parameters, **body.parameters}
         # Recompute k and omega whenever velocity or lref changes

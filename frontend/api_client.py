@@ -116,8 +116,11 @@ def download_cad(geo_id: int) -> tuple[bytes, str] | None:
     return r.content, filename
 
 
-def rename_geometry(geo_id: int, name: str) -> dict | None:
-    r = _patch(f"/geometries/{geo_id}", json={"name": name})
+def rename_geometry(geo_id: int, name: str, description: str | None = None) -> dict | None:
+    body = {"name": name}
+    if description is not None:
+        body["description"] = description
+    r = _patch(f"/geometries/{geo_id}", json=body)
     return r.json() if r.ok else None
 
 

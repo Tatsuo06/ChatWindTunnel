@@ -100,18 +100,20 @@ else:
     for geo in geos:
         is_selected = geo["id"] == geo_id
         if st.session_state.get(f"editing_geo_{geo['id']}"):
-            col1, col2, col3 = st.columns([4, 1, 1])
-            with col1:
-                new_name = st.text_input(t("geo_name_hint"), value=geo["name"],
-                                         key=f"rename_geo_{geo['id']}", label_visibility="collapsed")
-            with col2:
+            new_name = st.text_input(t("geo_name_hint"), value=geo["name"],
+                                     key=f"rename_geo_{geo['id']}", label_visibility="collapsed")
+            new_desc = st.text_area(t("description"), value=geo.get("description") or "",
+                                    key=f"redesc_geo_{geo['id']}", height=80)
+            bcol1, bcol2 = st.columns(2)
+            with bcol1:
                 if st.button(t("save"), key=f"save_geo_{geo['id']}", width="stretch"):
-                    if new_name.strip() and api.rename_geometry(geo["id"], new_name.strip()):
+                    if new_name.strip() and api.rename_geometry(geo["id"], new_name.strip(),
+                                                                description=new_desc):
                         if st.session_state.get("geo_id") == geo["id"]:
                             st.session_state["geo_name"] = new_name.strip()
                         st.session_state.pop(f"editing_geo_{geo['id']}", None)
                         st.rerun()
-            with col3:
+            with bcol2:
                 if st.button(t("cancel"), key=f"cancel_geo_{geo['id']}", width="stretch"):
                     st.session_state.pop(f"editing_geo_{geo['id']}", None)
                     st.rerun()
@@ -122,6 +124,8 @@ else:
                 name_md = f"**{prefix}{geo['name']}**" if is_selected else f"{prefix}{geo['name']}"
                 stl_label = t("stl_ready") if geo.get("stl_file_path") else t("no_stl")
                 st.markdown(f"{name_md}  \n{stl_label}")
+                if geo.get("description"):
+                    st.caption(geo["description"])
             with cols[1]:
                 if st.button(t("go_cases"), key=f"open_{geo['id']}", width="stretch"):
                     st.session_state["geo_id"] = geo["id"]

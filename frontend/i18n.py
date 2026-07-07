@@ -235,7 +235,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "summary_chat_caption": "e.g. \"Which geometry has the lowest drag?\" / \"How does yaw angle affect Cx?\" / \"Compare geometries.\"",
         "summary_chat_placeholder": "Ask a question about the project results",
         "chat_llm_unavailable": "Chat failed. Check that LM Studio is running.",
-        "rename_btn": "✏️ Rename",
         "delete_btn": "🗑 Delete",
 
         # --- results ---
@@ -518,7 +517,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "summary_chat_caption": "例: 「最もCxが低いジオメトリはどれですか？」「ヨー角がCxに与える影響は？」「ジオメトリを比較して」",
         "summary_chat_placeholder": "プロジェクト結果に関する質問を入力",
         "chat_llm_unavailable": "チャット失敗。LM Studio が起動しているか確認してください。",
-        "rename_btn": "✏️ 名前変更",
         "delete_btn": "🗑 削除",
 
         # --- results ---

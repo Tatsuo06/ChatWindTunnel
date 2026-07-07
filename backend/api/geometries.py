@@ -22,12 +22,14 @@ class GeometryCreate(BaseModel):
 
 class GeometryUpdate(BaseModel):
     name: str
+    description: str | None = None
 
 
 class GeometryResponse(BaseModel):
     id: int
     project_id: int
     name: str
+    description: str | None = ""
     stl_file_path: str | None
     cad_file_path: str | None
     transform_info: dict | None = None
@@ -89,6 +91,8 @@ async def update_geometry(geo_id: int, body: GeometryUpdate, current_user: Curre
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geometry not found")
     _assert_project_access(geo.project, current_user)
     geo.name = body.name
+    if body.description is not None:
+        geo.description = body.description
     await db.commit()
     await db.refresh(geo)
     return geo

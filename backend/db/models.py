@@ -65,6 +65,7 @@ class Geometry(Base):
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     name = Column(String(128), nullable=False, default="")
+    description = Column(Text, default="")
     cad_file_path = Column(String(512), default="")
     stl_file_path = Column(String(512), default="")
     transform_info = Column(JSON, default=None)  # {"mm_to_m": bool, "scale": float, "yaw": ..., "pitch": ..., "roll": ...}
@@ -80,6 +81,7 @@ class Simulation(Base):
     id = Column(Integer, primary_key=True)
     geometry_id = Column(Integer, ForeignKey("geometries.id"), nullable=False)
     name = Column(String(128), nullable=False, default="")
+    description = Column(Text, default="")
     solver_type = Column(Enum(SimulatorType), nullable=False, default=SimulatorType.steady)
     status = Column(Enum(SimulationStatus), nullable=False, default=SimulationStatus.pending)
 

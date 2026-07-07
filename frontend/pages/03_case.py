@@ -452,10 +452,13 @@ with left:
         if st.session_state.get(f"editing_sim_{s['id']}"):
             new_name = st.text_input(t("case_name"), value=s["name"],
                                      key=f"rename_sim_{s['id']}", label_visibility="collapsed")
+            new_desc = st.text_area(t("description"), value=s.get("description") or "",
+                                    key=f"redesc_sim_{s['id']}", height=80)
             bcol1, bcol2 = st.columns(2)
             with bcol1:
                 if st.button(t("save"), key=f"save_sim_{s['id']}", width="stretch"):
-                    if new_name.strip() and api.update_simulation(s["id"], name=new_name.strip()):
+                    if new_name.strip() and api.update_simulation(s["id"], name=new_name.strip(),
+                                                                  description=new_desc):
                         st.session_state.pop(f"editing_sim_{s['id']}", None)
                         st.rerun()
             with bcol2:
@@ -470,6 +473,8 @@ with left:
                 if st.button(label, key=f"sel_{s['id']}", width="stretch"):
                     st.session_state["sim_id"] = s["id"]
                     st.rerun()
+                if s.get("description"):
+                    st.caption(s["description"])
             with cols[1]:
                 if st.button("✏️", key=f"edit_sim_{s['id']}", help=t("rename")):
                     st.session_state[f"editing_sim_{s['id']}"] = True
@@ -504,16 +509,18 @@ with right:
     geo = api.get_geometry(geo_id)
 
     if st.session_state.get("editing_sim_header"):
-        hcol1, hcol2, hcol3 = st.columns([4, 1, 1])
+        new_name = st.text_input(t("case_name"), value=sim["name"],
+                                 key="rename_sim_header", label_visibility="collapsed")
+        new_desc = st.text_area(t("description"), value=sim.get("description") or "",
+                                key="redesc_sim_header", height=80)
+        hcol1, hcol2 = st.columns(2)
         with hcol1:
-            new_name = st.text_input(t("case_name"), value=sim["name"],
-                                     key="rename_sim_header", label_visibility="collapsed")
-        with hcol2:
             if st.button(t("save"), key="save_sim_header", width="stretch"):
-                if new_name.strip() and api.update_simulation(sim_id, name=new_name.strip()):
+                if new_name.strip() and api.update_simulation(sim_id, name=new_name.strip(),
+                                                              description=new_desc):
                     st.session_state.pop("editing_sim_header", None)
                     st.rerun()
-        with hcol3:
+        with hcol2:
             if st.button(t("cancel"), key="cancel_sim_header", width="stretch"):
                 st.session_state.pop("editing_sim_header", None)
                 st.rerun()
@@ -521,8 +528,10 @@ with right:
         hcol1, hcol2, hcol3 = st.columns([5, 1, 1])
         with hcol1:
             st.subheader(f"{sim['name']} — {sim['solver_type']}")
+            if sim.get("description"):
+                st.caption(sim["description"])
         with hcol2:
-            if st.button(t("rename_btn"), key="edit_sim_header"):
+            if st.button("✏️", key="edit_sim_header", help=t("rename")):
                 st.session_state["editing_sim_header"] = True
                 st.rerun()
         with hcol3:

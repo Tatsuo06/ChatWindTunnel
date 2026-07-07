@@ -14,6 +14,18 @@ async def lifespan(app: FastAPI):
     # Create tables on startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Lightweight migrations: create_all doesn't alter existing tables, so add
+    # late-added columns here (errors mean the column already exists)
+    from sqlalchemy import text
+    for ddl in (
+        "ALTER TABLE geometries ADD COLUMN description TEXT DEFAULT ''",
+        "ALTER TABLE simulations ADD COLUMN description TEXT DEFAULT ''",
+    ):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(ddl))
+        except Exception:
+            pass
     # Ensure data directories exist
     for d in (settings.UPLOAD_DIR, settings.CASES_DIR, settings.RESULTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
