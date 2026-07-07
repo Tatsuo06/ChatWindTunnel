@@ -131,6 +131,11 @@ _ALLRUN_LES = textwrap.dedent("""\
     rm -f log.mem_monitor.tmp
 
     # === Phase 2: LES (SpalartAllmarasDDES) ===
+    # Remember Phase 1's final iteration index (its time directory) before the
+    # swap, so it can be dropped after reconstruction and post-processing then
+    # targets the LES end time rather than this leftover RAS solution.
+    PHASE1_TIME=$(ls processor0 | grep -E "^[0-9]+(\.[0-9]+)?$" | sort -g | tail -1)
+
     # Swap steady-state solution as LES initial condition (use the latest
     # written time directory rather than a hardcoded value, since Phase 1's
     # endTime is configurable)
@@ -146,6 +151,14 @@ _ALLRUN_LES = textwrap.dedent("""\
 
     runApplication reconstructParMesh -constant
     runApplication reconstructPar
+
+    # Drop the leftover Phase-1 (RAS) time directory so -latestTime post-processing
+    # targets the LES end time. The RAS solution survives as the LES time-0 field.
+    rm -rf "./${PHASE1_TIME}" processor*/"${PHASE1_TIME}"
+
+    # Surface mesh (Mesh tab) and y=0 cutting plane of the LES field (Cutting-plane tab)
+    runApplication foamToVTK -no-internal -latestTime -fields '()'
+    runApplication postProcess -func cuttingPlane -latestTime
 """)
 
 _ALLRUN_RESTART = textwrap.dedent("""\
