@@ -570,9 +570,9 @@ with right:
 
         st.divider()
 
-        tab_mesh, tab_conv, tab_fc, tab_plane, tab_stream = st.tabs([
+        tab_mesh, tab_conv, tab_plane, tab_stream = st.tabs([
             t("tab_mesh"), t("tab_conv"),
-            t("tab_fc"),   t("tab_plane"), t("tab_stream"),
+            t("tab_plane"), t("tab_stream"),
         ])
 
         with tab_mesh:
@@ -614,7 +614,7 @@ with right:
                 else:
                     st.info(t("log_not_found"))
 
-        with tab_fc:
+            st.divider()
             st.subheader(t("force_coeffs"))
             img = api.get_force_coefficients_plot(sim_id)
             if img:
