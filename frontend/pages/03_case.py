@@ -350,7 +350,14 @@ with right:
                         st.session_state.pop("sim_id", None)
                         st.rerun()
 
-    tab_setup, tab_run = st.tabs([t("tab_setup"), t("tab_run")])
+    tab_setup, tab_run, tab_mesh, tab_conv, tab_flow = st.tabs([
+        t("tab_setup"), t("tab_run"),
+        t("tab_mesh"), t("tab_conv"), t("tab_flow"),
+    ])
+
+    current_status = sim.get("status", "PENDING")
+    _is_done = current_status == "DONE"
+    stats = api.get_mesh_stats(sim_id) if _is_done else None
 
     # ── Setup ──────────────────────────────────────────────────
     with tab_setup:
@@ -457,7 +464,6 @@ with right:
 
     # ── Run & Results ──────────────────────────────────────────
     with tab_run:
-        current_status = sim.get("status", "PENDING")
         status_color = {"PENDING": "🔵", "MESHING": "🟡", "RUNNING": "🟡",
                         "DONE": "🟢", "FAILED": "🔴"}
         st.markdown(f"{t('status_label')} {status_color.get(current_status, '')} {current_status}")
@@ -528,53 +534,54 @@ with right:
 
         if current_status == "FAILED" and sim.get("solver_type") == "STEADY":
             _show_restart_expander(sim, sim_id)
-            st.stop()
-
-        if current_status != "DONE":
+        elif not _is_done:
             st.info(t("sim_pending_msg"))
-            st.stop()
+        else:
+            st.success(t("sim_done"))
 
-        st.success(t("sim_done"))
+            started  = sim.get("started_at")
+            finished = sim.get("finished_at")
+            if started and finished:
+                from datetime import datetime, timezone
+                fmt = "%Y-%m-%dT%H:%M:%S"
+                try:
+                    s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                    f = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+                    elapsed = int((f - s).total_seconds())
+                    h, rem = divmod(elapsed, 3600)
+                    m, sec = divmod(rem, 60)
+                    elapsed_str = f"{h}h {m}m {sec}s" if h else f"{m}m {sec}s"
+                    st.caption(f"{t('calc_time')}: {elapsed_str}")
+                except Exception:
+                    pass
 
-        started  = sim.get("started_at")
-        finished = sim.get("finished_at")
-        if started and finished:
-            from datetime import datetime, timezone
-            fmt = "%Y-%m-%dT%H:%M:%S"
-            try:
-                s = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                f = datetime.fromisoformat(finished.replace("Z", "+00:00"))
-                elapsed = int((f - s).total_seconds())
-                h, rem = divmod(elapsed, 3600)
-                m, sec = divmod(rem, 60)
-                elapsed_str = f"{h}h {m}m {sec}s" if h else f"{m}m {sec}s"
-                st.caption(f"{t('calc_time')}: {elapsed_str}")
-            except Exception:
-                pass
+            if stats:
+                mem_parts = []
+                simple_kb = stats.get("peak_memory_simple_kb")
+                snappy_kb = stats.get("peak_memory_snappy_kb")
+                if simple_kb:
+                    mem_parts.append(f"simpleFoam: {simple_kb/1024/1024:.1f} GB")
+                if snappy_kb:
+                    mem_parts.append(f"snappyHexMesh: {snappy_kb/1024/1024:.1f} GB")
+                if mem_parts:
+                    st.caption(f"{t('stat_peak_memory')}: {' / '.join(mem_parts)}")
 
-        stats = api.get_mesh_stats(sim_id)
-        if stats:
-            mem_parts = []
-            simple_kb = stats.get("peak_memory_simple_kb")
-            snappy_kb = stats.get("peak_memory_snappy_kb")
-            if simple_kb:
-                mem_parts.append(f"simpleFoam: {simple_kb/1024/1024:.1f} GB")
-            if snappy_kb:
-                mem_parts.append(f"snappyHexMesh: {snappy_kb/1024/1024:.1f} GB")
-            if mem_parts:
-                st.caption(f"{t('stat_peak_memory')}: {' / '.join(mem_parts)}")
+            if sim.get("solver_type") == "STEADY":
+                _show_restart_expander(sim, sim_id)
 
-        # ── Restart ────────────────────────────────────────────────
-        if sim.get("solver_type") == "STEADY":
-            _show_restart_expander(sim, sim_id)
+            _chat_section(
+                sim_id,
+                chat_key="chat_results",
+                heading=t("chat_results_heading"),
+                caption=t("chat_results_caption"),
+                placeholder=t("chat_results_placeholder"),
+            )
 
-        st.divider()
-
-        tab_mesh, tab_conv, tab_flow = st.tabs([
-            t("tab_mesh"), t("tab_conv"), t("tab_flow"),
-        ])
-
-        with tab_mesh:
+    # ── Mesh ────────────────────────────────────
+    with tab_mesh:
+        if not _is_done:
+            st.info(t("sim_pending_msg"))
+        else:
             st.subheader(t("surface_mesh"))
 
             # Mesh stats
@@ -595,7 +602,11 @@ with right:
             else:
                 st.info(t("mesh_not_found"))
 
-        with tab_conv:
+    # ── Convergence ──────────────────────────────
+    with tab_conv:
+        if not _is_done:
+            st.info(t("sim_pending_msg"))
+        else:
             st.subheader(t("residuals"))
             if sim.get("solver_type") == "UNSTEADY":
                 # Show RAS (Phase 1) first, then LES (Phase 2) below it
@@ -621,7 +632,11 @@ with right:
             else:
                 st.info(t("fc_not_found"))
 
-        with tab_flow:
+    # ── Visualization ────────────────────────────
+    with tab_flow:
+        if not _is_done:
+            st.info(t("sim_pending_msg"))
+        else:
             st.subheader(t("cutting_plane"))
             field_opts = [t("field_p"), t("field_u"), t("field_mesh")]
             field = st.selectbox(t("field"), field_opts, key="field_select")
@@ -632,7 +647,6 @@ with right:
             else:
                 st.info(t("plane_not_found"))
 
-        with tab_flow:
             st.divider()
             stream_type = st.radio(
                 "Streamline type",
@@ -778,11 +792,3 @@ with right:
                         st.image(img, width="stretch")
                     else:
                         st.info(t("stream_not_found"))
-
-        _chat_section(
-            sim_id,
-            chat_key="chat_results",
-            heading=t("chat_results_heading"),
-            caption=t("chat_results_caption"),
-            placeholder=t("chat_results_placeholder"),
-        )
