@@ -570,9 +570,8 @@ with right:
 
         st.divider()
 
-        tab_mesh, tab_conv, tab_plane, tab_stream = st.tabs([
-            t("tab_mesh"), t("tab_conv"),
-            t("tab_plane"), t("tab_stream"),
+        tab_mesh, tab_conv, tab_flow = st.tabs([
+            t("tab_mesh"), t("tab_conv"), t("tab_flow"),
         ])
 
         with tab_mesh:
@@ -622,7 +621,7 @@ with right:
             else:
                 st.info(t("fc_not_found"))
 
-        with tab_plane:
+        with tab_flow:
             st.subheader(t("cutting_plane"))
             field_opts = [t("field_p"), t("field_u"), t("field_mesh")]
             field = st.selectbox(t("field"), field_opts, key="field_select")
@@ -633,7 +632,8 @@ with right:
             else:
                 st.info(t("plane_not_found"))
 
-        with tab_stream:
+        with tab_flow:
+            st.divider()
             stream_type = st.radio(
                 "Streamline type",
                 ["Free-space streamlines", "Wall-bounded streamlines"],
