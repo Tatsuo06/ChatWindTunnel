@@ -103,9 +103,10 @@ class PyVistaBackend(VisualizationBackend):
             # share the same postProcessing folder but have incompatible Time axes —
             # render them as separate subplots rather than one continuous line.
             colors = {"Cx": "#636efa", "Cz": "#ef553b", "CmYaw": "#00cc96", "Cy": "#ab63fa"}
-            fig = make_subplots(rows=1, cols=n_phases,
-                                 subplot_titles=[f"Phase {p}" for p in sorted(df["Phase"].unique())])
-            for i, phase in enumerate(sorted(df["Phase"].unique()), start=1):
+            phases = sorted(df["Phase"].unique())
+            fig = make_subplots(rows=n_phases, cols=1, vertical_spacing=0.16,
+                                 subplot_titles=[f"Phase {p}" for p in phases])
+            for i, phase in enumerate(phases, start=1):
                 phase_df = df[df["Phase"] == phase]
                 for col in ("Cx", "Cz", "CmYaw", "Cy"):
                     if col in phase_df.columns:
@@ -113,15 +114,15 @@ class PyVistaBackend(VisualizationBackend):
                             go.Scatter(x=phase_df["Time"], y=phase_df[col], name=col,
                                        mode="lines", line=dict(color=colors[col]),
                                        legendgroup=col, showlegend=(i == 1)),
-                            row=1, col=i,
+                            row=i, col=1,
                         )
                 xaxis_title = "Iteration" if phase == 1 else "Time [s]"
-                fig.update_xaxes(title_text=xaxis_title, row=1, col=i)
+                fig.update_xaxes(title_text=xaxis_title, row=i, col=1)
+                fig.update_yaxes(title_text="Coefficient", row=i, col=1)
             fig.update_layout(
                 title="Force / Moment Coefficients",
-                yaxis_title="Coefficient",
                 template="plotly_white",
-                height=400,
+                height=320 * n_phases,
             )
             return pio.to_image(fig, format="png")
 
