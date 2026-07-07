@@ -306,6 +306,11 @@ def get_geometry_domain_params(geo_id: int) -> dict | None:
     return r.json() if r.ok else None
 
 
+def sync_live_results(sim_id: int) -> bool:
+    r = _post(f"/simulations/{sim_id}/results/sync-live", timeout=120)
+    return bool(r.ok and r.json().get("synced"))
+
+
 def get_residuals_plot(sim_id: int, phase: int | None = None) -> bytes | None:
     params = {"phase": phase} if phase is not None else None
     r = _get(f"/simulations/{sim_id}/results/residuals", params=params)

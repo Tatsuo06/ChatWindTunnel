@@ -29,12 +29,13 @@ def _png(data: bytes) -> Response:
     return Response(content=data, media_type="image/png")
 
 
-def _maybe_sync_live(sim) -> None:
+def _maybe_sync_live(sim, force: bool = False) -> None:
     """Pull solver logs + force coefficients from the cluster for a RUNNING job.
 
     Throttled (20 s marker file) because the Convergence tab re-renders on
-    every Streamlit rerun. No-op for finished jobs and the local runner
-    (whose logs grow in place).
+    every Streamlit rerun; `force` bypasses the throttle for an explicit
+    Refresh. No-op for finished jobs and the local runner (whose logs grow
+    in place).
     """
     if sim.status not in (SimulationStatus.meshing, SimulationStatus.running):
         return
@@ -48,7 +49,7 @@ def _maybe_sync_live(sim) -> None:
     import time
     case_dir = Path(sim.case_dir)
     marker = case_dir / ".live_sync"
-    if marker.exists() and time.time() - marker.stat().st_mtime < 20:
+    if not force and marker.exists() and time.time() - marker.stat().st_mtime < 20:
         return
     try:
         runner.fetch_live_logs(case_dir)
@@ -182,6 +183,22 @@ async def geometry_3d_data(sim_id: int, current_user: CurrentUser, db: DB):
             "zmax": refbox["refbox_max"][2],
         },
     }
+
+
+@router.post("/sync-live")
+async def sync_live(sim_id: int, current_user: CurrentUser, db: DB):
+    """Force an immediate cluster log/force-coeff sync for a running job.
+
+    Used by the Convergence tab's Refresh button so the next render shows the
+    latest data without waiting out the 20 s throttle.
+    """
+    sim = await _get_done_sim(sim_id, db)
+    if not sim.case_dir:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+    import asyncio
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: _maybe_sync_live(sim, force=True))
+    return {"synced": sim.status.value in ("MESHING", "RUNNING")}
 
 
 @router.get("/residuals")

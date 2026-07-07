@@ -828,6 +828,10 @@ with right:
         else:
             if _conv_live:
                 st.caption(t("conv_live_note"))
+                if st.button(t("refresh"), key="conv_refresh", width="stretch"):
+                    with st.spinner(t("refresh_progress")):
+                        api.sync_live_results(sim_id)
+                    st.rerun()
             st.subheader(t("residuals"))
             if sim.get("solver_type") == "UNSTEADY":
                 # Stack the phases top to bottom: RAS, LES, and (when the case
