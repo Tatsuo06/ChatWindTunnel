@@ -563,30 +563,42 @@ with right:
         else:
             st.success(t("sim_done"))
 
+            # Wall-clock total (submission → completion; includes any queue wait)
+            wall_str = None
             started  = sim.get("started_at")
             finished = sim.get("finished_at")
             if started and finished:
-                from datetime import datetime, timezone
-                fmt = "%Y-%m-%dT%H:%M:%S"
+                from datetime import datetime
                 try:
                     s = datetime.fromisoformat(started.replace("Z", "+00:00"))
                     f = datetime.fromisoformat(finished.replace("Z", "+00:00"))
-                    elapsed = int((f - s).total_seconds())
-                    h, rem = divmod(elapsed, 3600)
-                    m, sec = divmod(rem, 60)
-                    elapsed_str = f"{h}h {m}m {sec}s" if h else f"{m}m {sec}s"
-                    st.caption(f"{t('calc_time')}: {elapsed_str}")
+                    wall_str = _fmt_secs((f - s).total_seconds())
                 except Exception:
                     pass
 
-            # LES: break the total down into mesh generation, Phase 1, Phase 2
-            if sim.get("solver_type") == "UNSTEADY" and stats:
-                if stats.get("mesh_s") is not None:
-                    st.caption(f"{t('mesh_gen_time')}: {_fmt_secs(stats['mesh_s'])}")
-                if stats.get("phase1_s") is not None:
-                    st.caption(f"{t('residuals_phase1')}: {_fmt_secs(stats['phase1_s'])}")
-                if stats.get("phase2_s") is not None:
-                    st.caption(f"{t('residuals_phase2')}: {_fmt_secs(stats['phase2_s'])}")
+            mesh_s   = stats.get("mesh_s") if stats else None
+            phase1_s = stats.get("phase1_s") if stats else None
+            phase2_s = stats.get("phase2_s") if stats else None
+
+            if sim.get("solver_type") == "UNSTEADY":
+                # LES: total plus a mesh / Phase 1 / Phase 2 breakdown
+                if wall_str:
+                    st.caption(f"{t('calc_time')}: {wall_str}")
+                if mesh_s is not None:
+                    st.caption(f"{t('mesh_gen_time')}: {_fmt_secs(mesh_s)}")
+                if phase1_s is not None:
+                    st.caption(f"{t('residuals_phase1')}: {_fmt_secs(phase1_s)}")
+                if phase2_s is not None:
+                    st.caption(f"{t('residuals_phase2')}: {_fmt_secs(phase2_s)}")
+            else:
+                # STEADY: mesh generation and the solver ClockTime (falls back to
+                # the wall total when the solver log has no ClockTime)
+                if mesh_s is not None:
+                    st.caption(f"{t('mesh_gen_time')}: {_fmt_secs(mesh_s)}")
+                if phase1_s is not None:
+                    st.caption(f"{t('calc_time')}: {_fmt_secs(phase1_s)}")
+                elif wall_str:
+                    st.caption(f"{t('calc_time')}: {wall_str}")
 
             if stats:
                 mem_parts = []
