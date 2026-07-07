@@ -150,6 +150,18 @@ def _chat_section(sim_id: int, chat_key: str, heading: str, caption: str, placeh
             st.error("Chat failed. Check that LM Studio is running.")
 
 
+def _fmt_secs(sec) -> str:
+    """Format seconds as 'Xh Ym Zs' (dropping leading zero units)."""
+    sec = int(round(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
 def _results_chat(sim_id: int, key: str):
     """Render the shared results chat. All tabs use the same per-simulation
     backend history; `key` only keeps the input widgets distinct."""
@@ -566,6 +578,15 @@ with right:
                     st.caption(f"{t('calc_time')}: {elapsed_str}")
                 except Exception:
                     pass
+
+            # LES: break the total down into mesh generation, Phase 1, Phase 2
+            if sim.get("solver_type") == "UNSTEADY" and stats:
+                if stats.get("mesh_s") is not None:
+                    st.caption(f"{t('mesh_gen_time')}: {_fmt_secs(stats['mesh_s'])}")
+                if stats.get("phase1_s") is not None:
+                    st.caption(f"{t('residuals_phase1')}: {_fmt_secs(stats['phase1_s'])}")
+                if stats.get("phase2_s") is not None:
+                    st.caption(f"{t('residuals_phase2')}: {_fmt_secs(stats['phase2_s'])}")
 
             if stats:
                 mem_parts = []

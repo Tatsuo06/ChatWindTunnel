@@ -152,6 +152,38 @@ def parse_clock_time(case_dir: Path) -> float | None:
     return float(matches[-1]) if matches else None
 
 
+def _final_clock_time(log_path: Path) -> float | None:
+    """Final ClockTime (seconds) from a specific solver log."""
+    if not log_path.exists():
+        return None
+    matches = re.findall(r"ClockTime\s*=\s*([\d.]+)\s*s", log_path.read_text(errors="replace"))
+    return float(matches[-1]) if matches else None
+
+
+def parse_phase_times(case_dir: Path) -> dict:
+    """Wall-clock seconds for each stage of a run.
+
+    mesh_s   — snappyHexMesh "Finished meshing in = X s"
+    phase1_s — simpleFoam ClockTime (RAS; Phase 1 of an unsteady run)
+    phase2_s — pisoFoam ClockTime  (LES; Phase 2 of an unsteady run)
+    Any stage that did not run / has no marker is None.
+    """
+    if not case_dir or not case_dir.exists():
+        return {"mesh_s": None, "phase1_s": None, "phase2_s": None}
+
+    mesh_s = None
+    snappy = case_dir / "log.snappyHexMesh"
+    if snappy.exists():
+        m = re.findall(r"Finished meshing in\s*=\s*([\d.]+)\s*s", snappy.read_text(errors="replace"))
+        mesh_s = float(m[-1]) if m else None
+
+    return {
+        "mesh_s": mesh_s,
+        "phase1_s": _final_clock_time(case_dir / "log.simpleFoam"),
+        "phase2_s": _final_clock_time(case_dir / "log.pisoFoam"),
+    }
+
+
 def parse_solver_diagnostics(case_dir: Path, log_override: Path | None = None) -> dict:
     """Extract solver health diagnostics from the solver log.
 

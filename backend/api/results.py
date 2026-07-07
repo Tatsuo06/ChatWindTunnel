@@ -254,7 +254,7 @@ async def mesh_surface(sim_id: int, view: str = "iso", current_user: CurrentUser
 @router.get("/mesh-stats")
 async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
     import pyvista as pv
-    from backend.visualization.parsers import parse_mesh_info, parse_peak_memory
+    from backend.visualization.parsers import parse_mesh_info, parse_peak_memory, parse_phase_times
 
     sim = await _get_done_sim(sim_id, db)
     if not sim.case_dir:
@@ -266,6 +266,9 @@ async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
         info["peak_memory_simple_kb"] = peak_mem["simpleFoam"]
     if peak_mem.get("snappyHexMesh") is not None:
         info["peak_memory_snappy_kb"] = peak_mem["snappyHexMesh"]
+
+    # Per-stage wall-clock times (mesh generation, Phase 1 RAS, Phase 2 LES)
+    info.update(parse_phase_times(case_dir))
 
     # Count surface cells from foamToVTK output (avoids needing time directories)
     vtk_candidates = sorted(
