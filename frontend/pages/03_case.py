@@ -150,6 +150,18 @@ def _chat_section(sim_id: int, chat_key: str, heading: str, caption: str, placeh
             st.error("Chat failed. Check that LM Studio is running.")
 
 
+def _results_chat(sim_id: int, key: str):
+    """Render the shared results chat. All tabs use the same per-simulation
+    backend history; `key` only keeps the input widgets distinct."""
+    _chat_section(
+        sim_id,
+        chat_key=key,
+        heading=t("chat_results_heading"),
+        caption=t("chat_results_caption"),
+        placeholder=t("chat_results_placeholder"),
+    )
+
+
 left, right = st.columns([1, 2])
 
 # ── Left pane ──────────────────────────────────────────────────
@@ -569,13 +581,7 @@ with right:
             if sim.get("solver_type") == "STEADY":
                 _show_restart_expander(sim, sim_id)
 
-            _chat_section(
-                sim_id,
-                chat_key="chat_results",
-                heading=t("chat_results_heading"),
-                caption=t("chat_results_caption"),
-                placeholder=t("chat_results_placeholder"),
-            )
+        _results_chat(sim_id, "chat_run")
 
     # ── Mesh ────────────────────────────────────
     with tab_mesh:
@@ -601,6 +607,8 @@ with right:
                 st.image(img, width="stretch")
             else:
                 st.info(t("mesh_not_found"))
+
+        _results_chat(sim_id, "chat_mesh")
 
     # ── Convergence ──────────────────────────────
     with tab_conv:
@@ -631,6 +639,8 @@ with right:
                 st.image(img, width="stretch")
             else:
                 st.info(t("fc_not_found"))
+
+        _results_chat(sim_id, "chat_conv")
 
     # ── Visualization ────────────────────────────
     with tab_flow:
@@ -792,3 +802,5 @@ with right:
                         st.image(img, width="stretch")
                     else:
                         st.info(t("stream_not_found"))
+
+        _results_chat(sim_id, "chat_flow")
