@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from backend.api.deps import DB, CurrentUser
-from backend.db.models import Geometry, Simulation, SimulationStatus
+from backend.db.models import Geometry, Simulation, SimulationStatus, SimulatorType
 from backend.visualization.pyvista_backend import backend
 
 router = APIRouter(prefix="/simulations/{sim_id}/results", tags=["results"])
@@ -287,6 +287,58 @@ async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
             pass
 
     return info
+
+
+def _case_geo_bounds(case_dir: Path) -> dict | None:
+    params_file = case_dir / "case_params.json"
+    if not params_file.exists():
+        return None
+    import json as _json
+    params = _json.loads(params_file.read_text())
+    rb_min = params.get("refbox_min")
+    rb_max = params.get("refbox_max")
+    if rb_min and rb_max:
+        return {"xmin": rb_min[0], "xmax": rb_max[0],
+                "zmin": rb_min[2], "zmax": rb_max[2]}
+    return None
+
+
+@router.get("/animation")
+async def animation(sim_id: int, kind: str = "plane", field: str = "U",
+                    force: bool = False, current_user: CurrentUser = None, db: DB = None):
+    """Return an MP4 animation of the LES phase (cached; rendered on first request)."""
+    sim = await _get_done_sim(sim_id, db)
+    if sim.solver_type != SimulatorType.unsteady:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Animations are only available for unsteady (LES) cases")
+    if not sim.case_dir:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+    if kind not in ("plane", "streamlines"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="kind must be plane or streamlines")
+    if field not in ("p", "U"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="field must be p or U")
+
+    case_dir = Path(sim.case_dir)
+    out_name = f"plane_{field}.mp4" if kind == "plane" else "streamlines.mp4"
+    out_path = case_dir / "animations" / out_name
+
+    if force or not out_path.exists():
+        geo_bounds = _case_geo_bounds(case_dir)
+        stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
+        import asyncio
+        loop = asyncio.get_event_loop()
+        try:
+            out_path = await loop.run_in_executor(
+                None,
+                lambda: backend.render_animation(
+                    case_dir, kind=kind, field=field, geo_bounds=geo_bounds,
+                    stl_path=stl_path if stl_path.exists() else None,
+                ),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    return Response(content=out_path.read_bytes(), media_type="video/mp4")
 
 
 @router.get("/streamlines")

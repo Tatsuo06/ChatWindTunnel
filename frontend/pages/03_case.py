@@ -839,4 +839,26 @@ with right:
                     else:
                         st.info(t("stream_not_found"))
 
+            # ── LES animation (unsteady only) ─────────────────
+            if sim.get("solver_type") == "UNSTEADY":
+                st.divider()
+                st.subheader(t("anim_section"))
+                anim_map = {
+                    t("anim_plane_u"): ("plane", "U"),
+                    t("anim_plane_p"): ("plane", "p"),
+                    t("anim_stream"):  ("streamlines", "U"),
+                }
+                anim_sel = st.selectbox(t("anim_kind"), list(anim_map.keys()), key="anim_kind")
+                anim_kind, anim_field = anim_map[anim_sel]
+                anim_cache_key = f"anim_{sim_id}_{anim_kind}_{anim_field}"
+                if st.button(t("anim_generate"), key="anim_btn"):
+                    with st.spinner(t("anim_generating")):
+                        video = api.get_animation(sim_id, kind=anim_kind, field=anim_field)
+                    if video:
+                        st.session_state[anim_cache_key] = video
+                    else:
+                        st.error(t("anim_not_available"))
+                if st.session_state.get(anim_cache_key):
+                    st.video(st.session_state[anim_cache_key])
+
         _results_chat(sim_id, "chat_flow")

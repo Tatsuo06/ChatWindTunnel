@@ -142,7 +142,10 @@ class PyVistaBackend(VisualizationBackend):
 
     def plot_cutting_plane(self, vtk_path: Path, field: str = "p",
                            geo_bounds: dict | None = None,
-                           stl_path: Path | None = None) -> bytes:
+                           stl_path: Path | None = None,
+                           clim: tuple | None = None,
+                           time_label: str | None = None,
+                           return_array: bool = False):
         mesh = pv.read(str(vtk_path))
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
 
@@ -159,6 +162,7 @@ class PyVistaBackend(VisualizationBackend):
                 mesh,
                 scalars=scalars,
                 cmap="jet",
+                clim=clim,
                 show_scalar_bar=True,
             )
 
@@ -171,6 +175,9 @@ class PyVistaBackend(VisualizationBackend):
                     pl.add_mesh(slice_y, color="black", line_width=2.0)
             except Exception:
                 pass
+
+        if time_label:
+            pl.add_text(time_label, position="upper_left", font_size=14, color="black")
 
         pl.add_axes()
         pl.view_xz()
@@ -191,6 +198,8 @@ class PyVistaBackend(VisualizationBackend):
 
         img = pl.screenshot(return_img=True)
         pl.close()
+        if return_array:
+            return img
         return _array_to_png(img)
 
     def cutting_plane_data(self, vtk_path: Path, field: str = "p") -> dict:
@@ -302,7 +311,10 @@ class PyVistaBackend(VisualizationBackend):
         return _array_to_png(img)
 
     def plot_streamlines(self, vtk_paths: "Path | list[Path]", geo_bounds: dict | None = None,
-                         stl_path: "Path | None" = None) -> bytes:
+                         stl_path: "Path | None" = None,
+                         clim: "tuple | None" = None,
+                         time_label: "str | None" = None,
+                         return_array: bool = False):
         import numpy as np
 
         if not isinstance(vtk_paths, list):
@@ -323,11 +335,12 @@ class PyVistaBackend(VisualizationBackend):
                 mesh["U_mag"] = np.linalg.norm(mesh.point_data["U"], axis=1)
             meshes.append(mesh)
 
-        u_max = max(
-            (float(m["U_mag"].max()) for m in meshes if "U_mag" in m.point_data),
-            default=None,
-        )
-        clim = [0, u_max]
+        if clim is None:
+            u_max = max(
+                (float(m["U_mag"].max()) for m in meshes if "U_mag" in m.point_data),
+                default=None,
+            )
+            clim = [0, u_max]
 
         scalar_bar_added = False
         for mesh in meshes:
@@ -345,6 +358,9 @@ class PyVistaBackend(VisualizationBackend):
             except Exception:
                 pass
 
+        if time_label:
+            pl.add_text(time_label, position="upper_left", font_size=14, color="black")
+
         pl.add_axes()
         pl.view_xz()
         if geo_bounds:
@@ -357,7 +373,126 @@ class PyVistaBackend(VisualizationBackend):
             pl.reset_camera()
         img = pl.screenshot(return_img=True)
         pl.close()
+        if return_array:
+            return img
         return _array_to_png(img)
+
+    def render_animation(self, case_dir: Path, kind: str = "plane", field: str = "U",
+                         fps: int = 10, geo_bounds: dict | None = None,
+                         stl_path: "Path | None" = None) -> Path:
+        """Render an MP4 of Phase-2 (LES) frames and return its path.
+
+        kind="plane":       postProcessing/cuttingPlane/<t>/yNormal.vtp frames
+        kind="streamlines": postProcessing/sets/streamLines(<Back>)/<t>/track0.vtp frames
+
+        All frames share one color scale (global min/max) and camera so the
+        video is temporally coherent. Raises ValueError with fewer than 2 frames.
+        """
+        import json
+        import numpy as np
+        import imageio.v2 as iio
+
+        def _tval(p: Path) -> float:
+            try:
+                return float(p.name)
+            except ValueError:
+                return -1.0
+
+        # Only physical LES times are animation frames — a leftover Phase-1
+        # iteration directory (e.g. "1000") would otherwise sort last and
+        # append a bogus RAS frame at the end of the video.
+        t_max = float("inf")
+        params_file = case_dir / "case_params.json"
+        if params_file.exists():
+            try:
+                les_end = json.loads(params_file.read_text()).get("les_end_time")
+                if les_end:
+                    t_max = float(les_end) * 1.001
+            except Exception:
+                pass
+
+        if kind == "plane":
+            frame_dirs = sorted(
+                (d for d in (case_dir / "postProcessing" / "cuttingPlane").glob("*")
+                 if d.is_dir() and (d / "yNormal.vtp").exists() and 0 <= _tval(d) <= t_max),
+                key=_tval,
+            )
+            if len(frame_dirs) < 2:
+                raise ValueError(f"Only {len(frame_dirs)} cutting-plane frame(s) available")
+
+            # Pass 1: global color range for the field across all frames
+            vmin, vmax = float("inf"), float("-inf")
+            for d in frame_dirs:
+                mesh = pv.read(str(d / "yNormal.vtp"))
+                vals = mesh.point_data.get(field, mesh.cell_data.get(field))
+                if vals is None:
+                    continue
+                vals = np.asarray(vals)
+                if vals.ndim == 2:  # vector field (U) → magnitude
+                    vals = np.linalg.norm(vals, axis=1)
+                vmin = min(vmin, float(vals.min()))
+                vmax = max(vmax, float(vals.max()))
+            clim = (vmin, vmax) if vmin < vmax else None
+
+            imgs = [
+                self.plot_cutting_plane(
+                    d / "yNormal.vtp", field=field, geo_bounds=geo_bounds,
+                    stl_path=stl_path, clim=clim,
+                    time_label=f"t = {_tval(d):g} s", return_array=True,
+                )
+                for d in frame_dirs
+            ]
+            out_name = f"plane_{field}.mp4"
+
+        elif kind == "streamlines":
+            fwd_root = case_dir / "postProcessing" / "sets" / "streamLines"
+            back_root = case_dir / "postProcessing" / "sets" / "streamLinesBack"
+            frame_dirs = sorted(
+                (d for d in fwd_root.glob("*")
+                 if d.is_dir() and (d / "track0.vtp").exists() and 0 <= _tval(d) <= t_max),
+                key=_tval,
+            )
+            if len(frame_dirs) < 2:
+                raise ValueError(f"Only {len(frame_dirs)} streamline frame(s) available")
+
+            # Pass 1: global |U| range across all frames
+            u_max = 0.0
+            for d in frame_dirs:
+                for root in (fwd_root, back_root):
+                    tp = root / d.name / "track0.vtp"
+                    if tp.exists():
+                        m = pv.read(str(tp))
+                        if "U" in m.point_data and m.point_data["U"].ndim == 2:
+                            u_max = max(u_max, float(np.linalg.norm(m.point_data["U"], axis=1).max()))
+            clim = (0.0, u_max) if u_max > 0 else None
+
+            imgs = []
+            for d in frame_dirs:
+                paths = [d / "track0.vtp"]
+                back = back_root / d.name / "track0.vtp"
+                if back.exists():
+                    paths.append(back)
+                imgs.append(self.plot_streamlines(
+                    paths, geo_bounds=geo_bounds, stl_path=stl_path,
+                    clim=clim, time_label=f"t = {_tval(d):g} s", return_array=True,
+                ))
+            out_name = "streamlines.mp4"
+
+        else:
+            raise ValueError(f"Unknown animation kind: {kind}")
+
+        out_dir = case_dir / "animations"
+        out_dir.mkdir(exist_ok=True)
+        out_path = out_dir / out_name
+        # yuv420p + even frame dimensions (1200x600) for browser-compatible H.264
+        writer = iio.get_writer(str(out_path), fps=fps, codec="libx264",
+                                pixelformat="yuv420p", macro_block_size=1)
+        try:
+            for img in imgs:
+                writer.append_data(img)
+        finally:
+            writer.close()
+        return out_path
 
 
 def _array_to_png(arr) -> bytes:

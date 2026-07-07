@@ -251,7 +251,7 @@ def build_case(
     _write_force_coeffs(case_dir, params)
     _write_snappy_hex_mesh(case_dir, params)
     _write_surface_feature_extract(case_dir)
-    _write_streamlines(case_dir, params)
+    _write_streamlines(case_dir, params, solver_type=solver_type)
 
     if solver_type == SimulatorType.steady:
         turb_model = params.get("turbulence_model", "kOmegaSST")
@@ -973,16 +973,24 @@ def _write_transport_properties(case_dir: Path, params: dict) -> None:
     tp.write_text(_set_value(tp.read_text(), "nu", f"{nu:.6g}"))
 
 
-def _write_streamlines(case_dir: Path, params: dict) -> None:
+def _write_streamlines(case_dir: Path, params: dict, solver_type: SimulatorType | None = None) -> None:
     """Write system/streamLines with two function objects sharing sphere seeds.
 
     streamLines     — trackForward true  (downstream)
     streamLinesBack — trackForward false (upstream)
     Both use the same Fibonacci-sphere seed cloud around the geometry.
+
+    For unsteady cases the write control switches to timeStep every
+    les_anim_interval so Phase 2 produces animation frames.
     """
     sl_file = case_dir / "system" / "streamLines"
     if not sl_file.exists():
         return
+    if solver_type == SimulatorType.unsteady:
+        write_control_block = (f"writeControl    timeStep;\n"
+                               f"    writeInterval   {_anim_interval(params)};")
+    else:
+        write_control_block = "writeControl    writeTime;"
     center   = params.get("streamline_center", [-1.0, 0.0, 0.5])
     radius   = params.get("streamline_radius", 0.5)
     n_points = int(params.get("streamline_n_points", 50))
@@ -1026,7 +1034,7 @@ streamLines
 {{
     libs            (fieldFunctionObjects);
     type            streamLine;
-    writeControl    writeTime;
+    {write_control_block}
     setFormat       vtk;
     trackForward    true;
     fields          ({fields_str});
@@ -1040,7 +1048,7 @@ streamLinesBack
 {{
     libs            (fieldFunctionObjects);
     type            streamLine;
-    writeControl    writeTime;
+    {write_control_block}
     setFormat       vtk;
     trackForward    false;
     fields          ({fields_str});
@@ -1065,6 +1073,24 @@ def _prepare_les_files(case_dir: Path, params: dict) -> None:
     if tp_src.exists():
         shutil.copy2(tp_src, case_dir / "constant" / "turbulenceProperties.les")
     _write_les_control_dict(case_dir, params)
+
+    # Animation frame frequency: the cuttingPlane function object runs during
+    # Phase 2 (included from controlDict.les) and writes a yNormal surface
+    # every les_anim_interval time steps.
+    cp_path = case_dir / "system" / "cuttingPlane"
+    if cp_path.exists():
+        anim = _anim_interval(params)
+        content = cp_path.read_text()
+        content = _set_value(content, "writeInterval", str(anim))
+        cp_path.write_text(content)
+
+
+def _anim_interval(params: dict) -> int:
+    """Phase 2 animation write interval in time steps, capped at the run length."""
+    end_time = float(params.get("les_end_time", 0.7))
+    delta_t = float(params.get("les_delta_t", 1e-4))
+    n_steps = max(1, round(end_time / delta_t))
+    return min(int(params.get("les_anim_interval", 100)), n_steps)
 
 
 def _write_les_control_dict(case_dir: Path, params: dict) -> None:

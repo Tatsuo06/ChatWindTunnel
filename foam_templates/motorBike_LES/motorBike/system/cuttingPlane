@@ -10,7 +10,11 @@ cuttingPlane
 {
     type            surfaces;
     libs            (sampling);
-    writeControl    writeTime;
+    // timeStep control so Phase 2 (LES) writes animation frames more often
+    // than the volume writeInterval; case_builder overrides the interval
+    // from the les_anim_interval parameter.
+    writeControl    timeStep;
+    writeInterval   100;
 
     surfaceFormat   vtk;
     fields          ( p U );

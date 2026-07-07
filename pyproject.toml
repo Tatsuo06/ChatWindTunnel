@@ -28,6 +28,8 @@ dependencies = [
     "plotly>=5.22",
     "pillow>=10.3",
     "pandas>=2.2",
+    "imageio>=2.31",
+    "imageio-ffmpeg>=0.4",
     # SSH / cluster
     "paramiko>=3.4",
     # Frontend

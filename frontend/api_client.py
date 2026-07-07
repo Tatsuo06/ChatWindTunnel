@@ -292,6 +292,13 @@ def get_cutting_plane_data(sim_id: int, field: str = "p") -> dict | None:
     return r.json() if r.ok else None
 
 
+def get_animation(sim_id: int, kind: str = "plane", field: str = "U") -> bytes | None:
+    # First request renders the video (~1-2 min for a full LES run)
+    r = _get(f"/simulations/{sim_id}/results/animation",
+             params={"kind": kind, "field": field}, timeout=600)
+    return r.content if r.ok else None
+
+
 def get_mesh_plot(sim_id: int, view: str = "iso") -> bytes | None:
     r = _get(f"/simulations/{sim_id}/results/mesh", params={"view": view})
     return r.content if r.ok else None
