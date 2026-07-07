@@ -599,15 +599,10 @@ with right:
         with tab_conv:
             st.subheader(t("residuals"))
             if sim.get("solver_type") == "UNSTEADY":
-                sub1, sub2 = st.tabs([t("residuals_phase1"), t("residuals_phase2")])
-                with sub1:
-                    img = api.get_residuals_plot(sim_id, phase=1)
-                    if img:
-                        st.image(img, width="stretch")
-                    else:
-                        st.info(t("log_not_found"))
-                with sub2:
-                    img = api.get_residuals_plot(sim_id, phase=2)
+                # Show RAS (Phase 1) first, then LES (Phase 2) below it
+                for phase, label in ((1, t("residuals_phase1")), (2, t("residuals_phase2"))):
+                    st.markdown(f"**{label}**")
+                    img = api.get_residuals_plot(sim_id, phase=phase)
                     if img:
                         st.image(img, width="stretch")
                     else:
