@@ -29,6 +29,33 @@ def _png(data: bytes) -> Response:
     return Response(content=data, media_type="image/png")
 
 
+def _maybe_sync_live(sim) -> None:
+    """Pull solver logs + force coefficients from the cluster for a RUNNING job.
+
+    Throttled (20 s marker file) because the Convergence tab re-renders on
+    every Streamlit rerun. No-op for finished jobs and the local runner
+    (whose logs grow in place).
+    """
+    if sim.status not in (SimulationStatus.meshing, SimulationStatus.running):
+        return
+    if not sim.case_dir:
+        return
+    from backend.cluster import get_runner
+    from backend.cluster.cluster_runner import ClusterRunner
+    runner = get_runner()
+    if not isinstance(runner, ClusterRunner):
+        return
+    import time
+    case_dir = Path(sim.case_dir)
+    marker = case_dir / ".live_sync"
+    if marker.exists() and time.time() - marker.stat().st_mtime < 20:
+        return
+    try:
+        runner.fetch_live_logs(case_dir)
+    finally:
+        marker.touch()
+
+
 @router.get("/geometry")
 async def geometry_preview(sim_id: int, current_user: CurrentUser, db: DB):
     import json as _json
@@ -162,6 +189,7 @@ async def residuals(sim_id: int, current_user: CurrentUser, db: DB, phase: int |
     sim = await _get_done_sim(sim_id, db)
     if not sim.case_dir:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+    _maybe_sync_live(sim)
     case_dir = Path(sim.case_dir)
 
     if phase is not None:
@@ -189,6 +217,7 @@ async def force_coefficients(sim_id: int, current_user: CurrentUser, db: DB):
     sim = await _get_done_sim(sim_id, db)
     if not sim.case_dir:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
+    _maybe_sync_live(sim)
     return _png(backend.plot_force_coefficients(Path(sim.case_dir)))
 
 

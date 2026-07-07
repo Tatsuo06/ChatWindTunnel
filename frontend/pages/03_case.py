@@ -806,9 +806,12 @@ with right:
 
     # ── Convergence ──────────────────────────────
     with tab_conv:
-        if not _is_done:
+        _conv_live = current_status in ("MESHING", "RUNNING")
+        if not _is_done and not _conv_live:
             st.info(t("sim_pending_msg"))
         else:
+            if _conv_live:
+                st.caption(t("conv_live_note"))
             st.subheader(t("residuals"))
             if sim.get("solver_type") == "UNSTEADY":
                 # Stack the phases top to bottom: RAS, LES, and (when the case

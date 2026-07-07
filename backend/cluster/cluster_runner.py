@@ -183,6 +183,28 @@ class ClusterRunner(JobRunner):
             if job_id in _jobs:
                 _jobs[job_id]["downloaded"] = True
 
+    def fetch_live_logs(self, case_dir: Path) -> None:
+        """Lightweight mid-run sync: solver logs + force coefficients only.
+
+        Lets the Convergence tab show residual/force histories while a job is
+        still running, without pulling the full case (frames, VTK, ...).
+        """
+        remote = f"{settings.CLUSTER_USER}@{settings.CLUSTER_HOST}:{self._remote_dir(case_dir)}"
+        key = str(Path(settings.CLUSTER_SSH_KEY).expanduser())
+        ssh_opt = f"ssh -i {key} -o StrictHostKeyChecking=no -o BatchMode=yes"
+        subprocess.run(
+            ["rsync", "-az", "--include=log.*Foam", "--exclude=*",
+             "-e", ssh_opt, f"{remote}/", f"{case_dir}/"],
+            check=False,
+        )
+        (case_dir / "postProcessing").mkdir(exist_ok=True)
+        subprocess.run(
+            ["rsync", "-az", "-e", ssh_opt,
+             f"{remote}/postProcessing/forceCoeffs1/",
+             f"{case_dir / 'postProcessing' / 'forceCoeffs1'}/"],
+            check=False,
+        )
+
     def cancel(self, job_id: str) -> None:
         _ssh(f"qdel {job_id}")
 
