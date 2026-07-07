@@ -136,10 +136,11 @@ def _parse_mem_log(path: Path) -> int | None:
 
 
 def parse_peak_memory(case_dir: Path) -> dict:
-    """Return peak RSS in kB for simpleFoam and snappyHexMesh."""
+    """Return peak RSS in kB for snappyHexMesh, simpleFoam and pisoFoam."""
     return {
         "simpleFoam":    _parse_mem_log(case_dir / "log.mem_monitor"),
         "snappyHexMesh": _parse_mem_log(case_dir / "log.mem_snappy"),
+        "pisoFoam":      _parse_mem_log(case_dir / "log.mem_piso"),
     }
 
 

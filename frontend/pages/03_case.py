@@ -590,12 +590,15 @@ with right:
 
             if stats:
                 mem_parts = []
-                simple_kb = stats.get("peak_memory_simple_kb")
                 snappy_kb = stats.get("peak_memory_snappy_kb")
-                if simple_kb:
-                    mem_parts.append(f"simpleFoam: {simple_kb/1024/1024:.1f} GB")
+                simple_kb = stats.get("peak_memory_simple_kb")
+                piso_kb = stats.get("peak_memory_piso_kb")
                 if snappy_kb:
                     mem_parts.append(f"snappyHexMesh: {snappy_kb/1024/1024:.1f} GB")
+                if simple_kb:
+                    mem_parts.append(f"simpleFoam: {simple_kb/1024/1024:.1f} GB")
+                if piso_kb:
+                    mem_parts.append(f"pisoFoam: {piso_kb/1024/1024:.1f} GB")
                 if mem_parts:
                     st.caption(f"{t('stat_peak_memory')}: {' / '.join(mem_parts)}")
 

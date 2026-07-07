@@ -147,7 +147,20 @@ _ALLRUN_LES = textwrap.dedent("""\
     cp -f system/fvSolution.les    system/fvSolution
     cp -f constant/turbulenceProperties.les  constant/turbulenceProperties
 
+    (
+        while true; do
+            ps aux | grep "[p]isoFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_piso.tmp
+            sleep 5
+        done
+    ) &
+    _MON_PISO=$!
     runParallel pisoFoam
+    kill $_MON_PISO 2>/dev/null
+    if [ -s log.mem_piso.tmp ]; then
+        peak=$(sort -n log.mem_piso.tmp | tail -1)
+        echo "Peak RSS (all pisoFoam processes): ${peak} kB" > log.mem_piso
+    fi
+    rm -f log.mem_piso.tmp
 
     runApplication reconstructParMesh -constant
     runApplication reconstructPar

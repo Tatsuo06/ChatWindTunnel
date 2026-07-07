@@ -266,6 +266,8 @@ async def mesh_stats(sim_id: int, current_user: CurrentUser, db: DB):
         info["peak_memory_simple_kb"] = peak_mem["simpleFoam"]
     if peak_mem.get("snappyHexMesh") is not None:
         info["peak_memory_snappy_kb"] = peak_mem["snappyHexMesh"]
+    if peak_mem.get("pisoFoam") is not None:
+        info["peak_memory_piso_kb"] = peak_mem["pisoFoam"]
 
     # Per-stage wall-clock times (mesh generation, Phase 1 RAS, Phase 2 LES)
     info.update(parse_phase_times(case_dir))
