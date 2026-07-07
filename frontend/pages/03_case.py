@@ -83,11 +83,19 @@ def _show_geometry_3d(data: dict) -> None:
     st.plotly_chart(fig)
 
 
-def _gas_settings_widgets(params: dict, key_prefix: str = "") -> dict:
+def _gas_settings_widgets(params: dict, key_prefix: str = "",
+                          rate_label_key: str = "source_rate",
+                          rate_help_key: str | None = None,
+                          rate_default: float = 1.0,
+                          rate_step: float = 0.5,
+                          rate_format: str | None = None) -> dict:
     """Shared gas-release widgets (preset / density ratio / source / rate).
 
-    Returns {"gas_density_ratio", "source_rate", "source_position"} where
-    source_position None means auto (top centre of the geometry).
+    The emission rate has different semantics per context (relative units in
+    the Boussinesq dispersion case, kg/s in the gas-LES restart), so its
+    label/help/default are injectable. Returns {"gas_density_ratio",
+    "source_rate", "source_position"}; source_position None = auto (top
+    centre of the geometry).
     """
     _presets = {t("gas_preset_co2"): 1.53, t("gas_preset_methane"): 0.55,
                 t("gas_preset_hydrogen"): 0.07, t("gas_preset_custom"): None}
@@ -109,9 +117,10 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "") -> dict:
             ratio = _preset_ratio
     with gcol3:
         rate = st.number_input(
-            t("source_rate"),
-            value=float(params.get("source_rate", 1.0)),
-            min_value=0.0, step=0.5,
+            t(rate_label_key),
+            value=float(params.get("source_rate", rate_default)),
+            min_value=0.0, step=rate_step, format=rate_format,
+            help=t(rate_help_key) if rate_help_key else None,
             key=f"{key_prefix}gas_rate",
         )
     auto_src = st.checkbox(t("source_auto"),
@@ -143,7 +152,15 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
         return  # legacy SA-based LES: no compatible restart path
     with st.expander(t("restart_gas_title"), expanded=False):
         st.caption(t("restart_gas_note"))
-        gas = _gas_settings_widgets(params, key_prefix="gr_")
+        # source_rate means kg/s here (Phase-A relative values don't carry over)
+        gas_params = {k: v for k, v in params.items() if k != "source_rate"}
+        gas = _gas_settings_widgets(
+            gas_params, key_prefix="gr_",
+            rate_label_key="source_rate_abs",
+            rate_help_key="source_rate_help_gas",
+            rate_default=1e-4, rate_step=1e-4, rate_format="%.5f",
+        )
+        st.caption(t("source_rate_note_gas"))
         gc1, gc2, gc3 = st.columns(3)
         with gc1:
             gas_end = st.number_input(
@@ -452,13 +469,10 @@ with left:
         if st.session_state.get(f"editing_sim_{s['id']}"):
             new_name = st.text_input(t("case_name"), value=s["name"],
                                      key=f"rename_sim_{s['id']}", label_visibility="collapsed")
-            new_desc = st.text_area(t("description"), value=s.get("description") or "",
-                                    key=f"redesc_sim_{s['id']}", height=80)
             bcol1, bcol2 = st.columns(2)
             with bcol1:
                 if st.button(t("save"), key=f"save_sim_{s['id']}", width="stretch"):
-                    if new_name.strip() and api.update_simulation(s["id"], name=new_name.strip(),
-                                                                  description=new_desc):
+                    if new_name.strip() and api.update_simulation(s["id"], name=new_name.strip()):
                         st.session_state.pop(f"editing_sim_{s['id']}", None)
                         st.rerun()
             with bcol2:
@@ -473,8 +487,6 @@ with left:
                 if st.button(label, key=f"sel_{s['id']}", width="stretch"):
                     st.session_state["sim_id"] = s["id"]
                     st.rerun()
-                if s.get("description"):
-                    st.caption(s["description"])
             with cols[1]:
                 if st.button("✏️", key=f"edit_sim_{s['id']}", help=t("rename")):
                     st.session_state[f"editing_sim_{s['id']}"] = True

@@ -384,7 +384,11 @@ async def update_simulation(sim_id: int, body: SimulationUpdate, current_user: C
     sim = await _get_sim(sim_id, db)
     _assert_access(sim, current_user)
 
-    if sim.status in (SimulationStatus.meshing, SimulationStatus.running):
+    # Metadata (name/description) is safe to edit any time; solver inputs are
+    # locked while the job is running
+    _solver_fields_touched = any(v is not None for v in
+                                 (body.parameters, body.yaw_deg, body.pitch_deg, body.roll_deg))
+    if _solver_fields_touched and sim.status in (SimulationStatus.meshing, SimulationStatus.running):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Cannot update a simulation that is currently running")
 

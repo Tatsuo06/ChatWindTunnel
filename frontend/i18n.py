@@ -144,6 +144,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restart_gas_btn": "🧪 Start gas-dispersion LES",
         "gas_end_time_lbl": "Gas LES end time [s]",
         "gas_delta_t_lbl": "Gas LES time step [s]",
+        "source_rate_abs": "Emission rate [kg/s]",
+        "source_rate_help_gas": ("Released gas mass flow in kg/s, injected continuously at the "
+                                 "release point."),
+        "source_rate_note_gas": ("Emission rate = released gas mass flow [kg/s]. Guideline: local "
+                                 "concentration near the source Y ≈ rate ÷ (ρair × U × dx²) with dx "
+                                 "the local cell size. Recommended start: 1e-4 (Y ≈ 0.1 for this "
+                                 "mesh); 1e-5 is very dilute; above ~1e-3 the source cell approaches "
+                                 "pure gas and the strong local buoyant jet risks instability. In "
+                                 "the dilute range the concentration field scales roughly linearly "
+                                 "with the rate."),
         "residuals_phase3": "Phase 3 (Gas LES)",
         "phase3_label": "Phase 3: Gas LES ({})",
         "anim_plane_c": "Cutting plane C (concentration)",
@@ -426,6 +436,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restart_gas_btn": "🧪 ガス拡散LES開始",
         "gas_end_time_lbl": "ガスLES 終了時間 [s]",
         "gas_delta_t_lbl": "ガスLES 時間刻み幅 [s]",
+        "source_rate_abs": "放出強度 [kg/s]",
+        "source_rate_help_gas": "放出点に連続注入されるガスの質量流量 [kg/s] です。",
+        "source_rate_note_gas": ("放出強度 = 放出ガスの質量流量 [kg/s]。目安: 放出点近傍の濃度 "
+                                 "Y ≈ 放出強度 ÷ (ρ空気 × U × dx²)（dxは放出点のセルサイズ）。"
+                                 "推奨初期値は 1e-4（このメッシュで Y≈0.1）。1e-5 は非常に希薄、"
+                                 "~1e-3 以上は放出セルがほぼ純ガスとなり局所的な強い浮力ジェットで"
+                                 "不安定化のリスクがあります。希薄域では濃度分布は放出強度にほぼ"
+                                 "線形にスケールします。"),
         "residuals_phase3": "Phase 3 (Gas LES)",
         "phase3_label": "Phase 3: Gas LES ({})",
         "anim_plane_c": "断面 C（濃度）",
