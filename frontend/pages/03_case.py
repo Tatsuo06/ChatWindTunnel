@@ -341,15 +341,10 @@ with left:
     with st.expander(t("new_case"), expanded=not sims):
         with st.form("new_sim_form"):
             sim_name = st.text_input(t("case_name"))
-            case_type_sel = st.selectbox(
-                t("case_type_label"),
-                [t("case_type_aero"), t("case_type_dispersion")],
-            )
-            # All cases start steady; switch to LES afterwards via Run-tab restart
+            # All cases start as steady aero; LES and gas dispersion are
+            # reached afterwards via the Run-tab restarts
             if st.form_submit_button(t("create"), width="stretch"):
-                case_type = "dispersion" if case_type_sel == t("case_type_dispersion") else "aero"
-                result = api.create_simulation(geo_id, sim_name, "STEADY",
-                                               parameters={"case_type": case_type})
+                result = api.create_simulation(geo_id, sim_name, "STEADY")
                 if result:
                     st.session_state["sim_id"] = result["id"]
                     st.rerun()
