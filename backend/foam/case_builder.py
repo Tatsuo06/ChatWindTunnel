@@ -17,6 +17,9 @@ from backend.db.models import SimulatorType
 STEADY_TEMPLATE = settings.TEMPLATES_DIR / "motorBike"
 UNSTEADY_TEMPLATE = settings.TEMPLATES_DIR / "motorBike_LES" / "motorBike"
 LES_FILES = settings.TEMPLATES_DIR / "motorBike_LES" / "lesFiles"
+# kOmegaSST-based DES configs for restarting a converged steady case as LES
+LES_FILES_KOSST = settings.TEMPLATES_DIR / "lesFiles_kOmegaSST"
+LES_RESTART_MODELS = ("kOmegaSSTDDES", "kOmegaSSTIDDES")
 
 # ---------------------------------------------------------------------------
 # Custom Allrun scripts (replace template Allrun that copies motorBike.obj.gz)
@@ -202,6 +205,62 @@ _ALLRUN_RESTART = textwrap.dedent("""\
     runApplication reconstructPar -latestTime
 """)
 
+_ALLRUN_LES_RESTART = textwrap.dedent("""\
+    #!/bin/sh
+    cd "${0%/*}" || exit
+    . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+    # === LES restart from a converged steady (kOmegaSST) solution ===
+    # The steady case's decomposed fields become the LES initial condition;
+    # no separate RAS phase is needed (kOmegaSST DES-family models use the
+    # same k/omega/nut fields the steady run produced).
+    PHASE1_TIME=$(ls processor0 | grep -E "^[0-9]+(\\.[0-9]+)?$" | sort -g | tail -1)
+    if [ -z "$PHASE1_TIME" ] || [ "$PHASE1_TIME" = "0" ]; then
+        echo "ERROR: no written steady solution in processor dirs (latest time: '${PHASE1_TIME}')" >&2
+        exit 1
+    fi
+
+    # Steady solution -> LES time 0, then drop all other steady time dirs so
+    # reconstructPar only picks up LES output
+    ls -d processor* | xargs -I {} sh -c 'cp -r {}/'"$PHASE1_TIME"' {}/0_les; for t in $(ls {} | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf {}/$t; done; mv {}/0_les {}/0; rm -rf {}/0/uniform'
+
+    # Drop reconstructed steady time dirs at the case root for the same reason
+    # (also keeps -latestTime post-processing pointed at the LES end time)
+    for t in $(ls . | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf "./$t"; done
+
+    # Swap in the LES configs prepared by build_les_restart_case
+    cp -f system/controlDict.les   system/controlDict
+    cp -f system/fvSchemes.les     system/fvSchemes
+    cp -f system/fvSolution.les    system/fvSolution
+    cp -f constant/turbulenceProperties.les  constant/turbulenceProperties
+
+    # The steady run already wrote these logs; remove them so runApplication
+    # re-runs the corresponding post-processing steps for the LES result
+    rm -f log.pisoFoam log.reconstructParMesh log.reconstructPar log.foamToVTK log.postProcess
+
+    (
+        while true; do
+            ps aux | grep "[p]isoFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_piso.tmp
+            sleep 5
+        done
+    ) &
+    _MON_PISO=$!
+    runParallel pisoFoam
+    kill $_MON_PISO 2>/dev/null
+    if [ -s log.mem_piso.tmp ]; then
+        peak=$(sort -n log.mem_piso.tmp | tail -1)
+        echo "Peak RSS (all pisoFoam processes): ${peak} kB" > log.mem_piso
+    fi
+    rm -f log.mem_piso.tmp
+
+    runApplication reconstructParMesh -constant
+    runApplication reconstructPar
+
+    # Surface mesh (Mesh tab) and y=0 cutting plane of the LES field (Visualization tab)
+    runApplication foamToVTK -no-internal -latestTime -fields '()'
+    runApplication postProcess -func cuttingPlane -latestTime
+""")
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -295,6 +354,54 @@ def build_restart_case(case_dir: Path, new_end_time: int) -> Path:
 
     allrun = case_dir / "Allrun"
     allrun.write_text(_ALLRUN_RESTART)
+    allrun.chmod(0o755)
+
+    return case_dir
+
+
+def build_les_restart_case(case_dir: Path, params: dict) -> Path:
+    """Convert a finished steady (kOmegaSST) case for an LES restart.
+
+    Prepares kOmegaSSTDDES/IDDES configs as .les-suffixed files and an Allrun
+    that seeds the LES from the steady solution (no separate RAS phase — the
+    DES-family models reuse the steady run's k/omega/nut fields directly).
+    """
+    les_model = params.get("les_model", "kOmegaSSTDDES")
+    if les_model not in LES_RESTART_MODELS:
+        raise ValueError(f"les_model must be one of {LES_RESTART_MODELS}, got {les_model!r}")
+
+    # Phase 2 configs (.les files the Allrun swaps in)
+    _write_les_control_dict(case_dir, params, src_dir=LES_FILES_KOSST)
+    for fname in ("fvSchemes", "fvSolution"):
+        shutil.copy2(LES_FILES_KOSST / fname, case_dir / "system" / f"{fname}.les")
+    tp_src = LES_FILES_KOSST / ("turbulenceProperties.IDDES" if les_model == "kOmegaSSTIDDES"
+                                else "turbulenceProperties")
+    tp_content = _set_value(tp_src.read_text(), "LESModel", les_model)
+    (case_dir / "constant" / "turbulenceProperties.les").write_text(tp_content)
+
+    # Animation-frame function objects (timeStep control)
+    _write_anim_cutting_plane(case_dir, params)
+    _write_streamlines(case_dir, params, solver_type=SimulatorType.unsteady)
+
+    # Clear steady-time function-object output: the static cutting-plane and
+    # streamline endpoints pick the numerically latest time directory, and
+    # leftover steady iterations (e.g. 1000) would shadow the LES times (≤ ~1 s)
+    for sub in ("cuttingPlane", "sets/streamLines", "sets/streamLinesBack"):
+        d = case_dir / "postProcessing" / sub
+        if d.exists():
+            shutil.rmtree(d)
+
+    # The animation time filter and the progress endpoint read LES parameters
+    # from case_params.json — merge the restart values in
+    params_file = case_dir / "case_params.json"
+    merged = json.loads(params_file.read_text()) if params_file.exists() else {}
+    for key in ("les_end_time", "les_delta_t", "les_anim_interval", "les_model"):
+        if key in params:
+            merged[key] = params[key]
+    params_file.write_text(json.dumps(merged, indent=2))
+
+    allrun = case_dir / "Allrun"
+    allrun.write_text(_ALLRUN_LES_RESTART)
     allrun.chmod(0o755)
 
     return case_dir
@@ -1074,15 +1181,23 @@ def _prepare_les_files(case_dir: Path, params: dict) -> None:
         shutil.copy2(tp_src, case_dir / "constant" / "turbulenceProperties.les")
     _write_les_control_dict(case_dir, params)
 
-    # Animation frame frequency: the cuttingPlane function object runs during
-    # Phase 2 (included from controlDict.les) and writes a yNormal surface
-    # every les_anim_interval time steps.
-    cp_path = case_dir / "system" / "cuttingPlane"
-    if cp_path.exists():
-        anim = _anim_interval(params)
-        content = cp_path.read_text()
-        content = _set_value(content, "writeInterval", str(anim))
-        cp_path.write_text(content)
+    _write_anim_cutting_plane(case_dir, params)
+
+
+def _write_anim_cutting_plane(case_dir: Path, params: dict) -> None:
+    """Install the timeStep-controlled cuttingPlane dict for LES animation frames.
+
+    The function object runs during the LES phase (included from
+    controlDict.les) and writes a yNormal surface every les_anim_interval
+    time steps. Sourcing from the unsteady template also replaces a steady
+    case's writeTime-controlled version on steady→LES restart.
+    """
+    src = UNSTEADY_TEMPLATE / "system" / "cuttingPlane"
+    if not src.exists():
+        return
+    content = src.read_text()
+    content = _set_value(content, "writeInterval", str(_anim_interval(params)))
+    (case_dir / "system" / "cuttingPlane").write_text(content)
 
 
 def _anim_interval(params: dict) -> int:
@@ -1093,9 +1208,9 @@ def _anim_interval(params: dict) -> int:
     return min(int(params.get("les_anim_interval", 100)), n_steps)
 
 
-def _write_les_control_dict(case_dir: Path, params: dict) -> None:
+def _write_les_control_dict(case_dir: Path, params: dict, src_dir: Path = LES_FILES) -> None:
     """Write system/controlDict.les with Phase 2 (LES) endTime/deltaT from params."""
-    src = LES_FILES / "controlDict"
+    src = src_dir / "controlDict"
     if not src.exists():
         return
     end_time = float(params.get("les_end_time", 0.7))

@@ -1,0 +1,41 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   A nd           | Website:  www.openfoam.com                      |
+|   \\  /    O peration     | Version:  v2206                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      turbulenceProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+simulationType  LES;
+
+LES
+{
+    LESModel            kOmegaSSTIDDES;
+
+    // IDDES requires the IDDESDelta filter width
+    delta               IDDESDelta;
+
+    printCoeffs         on;
+
+    turbulence          on;
+
+    IDDESDeltaCoeffs
+    {
+        hmax           maxDeltaxyzCubeRoot;
+        maxDeltaxyzCubeRootCoeffs
+        {
+        }
+    }
+}
+
+
+// ************************************************************************* //

@@ -89,11 +89,10 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_solver_settings",
-            "description": "Set solver type, turbulence model, and time control parameters.",
+            "description": "Set turbulence model and time control parameters. (All cases run steady; LES is started afterwards by restarting a finished case from the Run tab.)",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "solver_type": {"type": "string", "enum": ["STEADY", "UNSTEADY"]},
                     "turbulence_model": {
                         "type": "string",
                         "enum": ["kOmegaSST", "SpalartAllmaras", "realizableKE", "laminar"],
@@ -219,7 +218,6 @@ TOOLS = [
                     "pitch_deg": {"type": "number", "description": "Pitch angle in degrees (default 0)"},
                     "roll_deg": {"type": "number", "description": "Roll angle in degrees (default 0)"},
                     "velocity_mps": {"type": "number", "description": "Wind speed in m/s"},
-                    "solver_type": {"type": "string", "enum": ["STEADY", "UNSTEADY"], "description": "Solver type (default STEADY)"},
                 },
                 "required": ["name", "yaw_deg", "velocity_mps"],
             },

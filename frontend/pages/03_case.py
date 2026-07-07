@@ -83,27 +83,78 @@ def _show_geometry_3d(data: dict) -> None:
     st.plotly_chart(fig)
 
 
-def _show_restart_expander(sim: dict, sim_id: int) -> None:
+def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> None:
     with st.expander(t("restart_job"), expanded=False):
-        current_end = int(sim.get("parameters", {}).get("end_time", 500))
-        st.caption(f"{t('restart_current_end')}: {current_end}")
-        add_steps = st.number_input(
-            t("restart_add_steps"),
-            min_value=1,
-            value=500,
-            step=100,
-            key="restart_add_steps_input",
-        )
-        new_end = current_end + int(add_steps)
-        st.caption(f"{t('restart_new_end')}: {new_end}")
-        if st.button(t("restart_job"), key="restart_btn", width="stretch"):
-            with st.spinner(t("restarting")):
-                result = api.restart_job(sim_id, new_end)
-            if result:
-                st.success(t("restart_ok", result.get("job_id")))
-                st.rerun()
-            else:
-                st.error(t("restart_fail"))
+        params = sim.get("parameters", {})
+        les_selected = False
+        if allow_les:
+            mode = st.radio(
+                t("restart_mode"),
+                [t("restart_mode_steady"), t("restart_mode_les")],
+                horizontal=True, key="restart_mode",
+            )
+            les_selected = mode == t("restart_mode_les")
+
+        if not les_selected:
+            current_end = int(params.get("end_time", 500))
+            st.caption(f"{t('restart_current_end')}: {current_end}")
+            add_steps = st.number_input(
+                t("restart_add_steps"),
+                min_value=1,
+                value=500,
+                step=100,
+                key="restart_add_steps_input",
+            )
+            new_end = current_end + int(add_steps)
+            st.caption(f"{t('restart_new_end')}: {new_end}")
+            if st.button(t("restart_job"), key="restart_btn", width="stretch"):
+                with st.spinner(t("restarting")):
+                    result = api.restart_job(sim_id, new_end)
+                if result:
+                    st.success(t("restart_ok", result.get("job_id")))
+                    st.rerun()
+                else:
+                    st.error(t("restart_fail"))
+        else:
+            turb = params.get("turbulence_model", "kOmegaSST")
+            if turb != "kOmegaSST":
+                st.warning(t("restart_les_kosst_only", turb))
+                return
+            st.caption(t("restart_les_note"))
+            lc1, lc2 = st.columns(2)
+            with lc1:
+                les_end = st.number_input(
+                    t("les_end_time"),
+                    value=float(params.get("les_end_time", 0.7)),
+                    min_value=0.001, step=0.1, format="%.4f", key="restart_les_end",
+                )
+            with lc2:
+                les_dt = st.number_input(
+                    t("les_delta_t"),
+                    value=float(params.get("les_delta_t", 1e-4)),
+                    min_value=1e-6, step=1e-5, format="%.6f", key="restart_les_dt",
+                )
+            lc3, lc4 = st.columns(2)
+            with lc3:
+                les_anim = st.number_input(
+                    t("les_anim_interval_lbl"),
+                    value=int(params.get("les_anim_interval", 100)),
+                    min_value=1, step=10, key="restart_les_anim",
+                )
+            with lc4:
+                les_model = st.selectbox(
+                    t("les_model_lbl"),
+                    ["kOmegaSSTDDES", "kOmegaSSTIDDES"],
+                    key="restart_les_model",
+                )
+            if st.button(t("restart_les_btn"), key="restart_les_btn", width="stretch"):
+                with st.spinner(t("restarting")):
+                    result = api.restart_job_les(sim_id, les_end, les_dt, int(les_anim), les_model)
+                if result:
+                    st.success(t("restart_ok", result.get("job_id")))
+                    st.rerun()
+                else:
+                    st.error(t("restart_fail"))
 
 if "token" not in st.session_state:
     st.warning(t("login_required"))
@@ -184,9 +235,9 @@ with left:
     with st.expander(t("new_case"), expanded=not sims):
         with st.form("new_sim_form"):
             sim_name = st.text_input(t("case_name"))
-            solver   = st.selectbox(t("solver"), ["STEADY", "UNSTEADY"])
+            # All cases start steady; switch to LES afterwards via Run-tab restart
             if st.form_submit_button(t("create"), width="stretch"):
-                result = api.create_simulation(geo_id, sim_name, solver)
+                result = api.create_simulation(geo_id, sim_name, "STEADY")
                 if result:
                     st.session_state["sim_id"] = result["id"]
                     st.rerun()
@@ -615,7 +666,7 @@ with right:
                     st.caption(f"{t('stat_peak_memory')}: {' / '.join(mem_parts)}")
 
             if sim.get("solver_type") == "STEADY":
-                _show_restart_expander(sim, sim_id)
+                _show_restart_expander(sim, sim_id, allow_les=True)
 
         _results_chat(sim_id, "chat_run")
 

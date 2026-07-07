@@ -203,7 +203,20 @@ def cancel_job(sim_id: int) -> bool:
 
 
 def restart_job(sim_id: int, new_end_time: int) -> dict | None:
-    r = _post(f"/simulations/{sim_id}/job/restart", json={"new_end_time": new_end_time})
+    r = _post(f"/simulations/{sim_id}/job/restart",
+              json={"mode": "steady", "new_end_time": new_end_time})
+    return r.json() if r.ok else None
+
+
+def restart_job_les(sim_id: int, les_end_time: float, les_delta_t: float,
+                    les_anim_interval: int, les_model: str) -> dict | None:
+    r = _post(f"/simulations/{sim_id}/job/restart", json={
+        "mode": "unsteady",
+        "les_end_time": les_end_time,
+        "les_delta_t": les_delta_t,
+        "les_anim_interval": les_anim_interval,
+        "les_model": les_model,
+    })
     return r.json() if r.ok else None
 
 

@@ -205,12 +205,19 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
 
 
 class RestartRequest(BaseModel):
-    new_end_time: int
+    mode: str = "steady"           # "steady" = extend iterations | "unsteady" = transition to LES
+    new_end_time: int | None = None
+    les_end_time: float | None = None
+    les_delta_t: float | None = None
+    les_anim_interval: int | None = None
+    les_model: str = "kOmegaSSTDDES"
 
 
 @router.post("/restart", response_model=JobStatusResponse)
 async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUser, db: DB):
-    """Continue a finished steady-state simulation with an extended endTime."""
+    """Restart a finished steady case: extend it, or transition it to LES."""
+    from backend.foam.case_builder import build_les_restart_case, LES_RESTART_MODELS
+
     sim = await _get_sim_with_geo(sim_id, db)
     if current_user.role != UserRole.admin and sim.geometry.project.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
@@ -221,7 +228,35 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
     if sim.solver_type != SimulatorType.steady:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Restart only supported for steady-state simulations")
 
-    build_restart_case(Path(sim.case_dir), body.new_end_time)
+    if body.mode == "steady":
+        if body.new_end_time is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="new_end_time is required for steady restart")
+        build_restart_case(Path(sim.case_dir), body.new_end_time)
+        new_params = {**sim.parameters, "end_time": body.new_end_time}
+        new_solver_type = sim.solver_type
+
+    elif body.mode == "unsteady":
+        if sim.status != SimulationStatus.done:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="LES transition requires a completed (DONE) steady run")
+        turb = sim.parameters.get("turbulence_model", "kOmegaSST")
+        if turb != "kOmegaSST":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"LES transition requires a kOmegaSST steady solution (this case used {turb})")
+        if body.les_model not in LES_RESTART_MODELS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"les_model must be one of {LES_RESTART_MODELS}")
+        new_params = {**sim.parameters, "les_model": body.les_model}
+        for key, val in (("les_end_time", body.les_end_time),
+                         ("les_delta_t", body.les_delta_t),
+                         ("les_anim_interval", body.les_anim_interval)):
+            if val is not None:
+                new_params[key] = val
+        build_les_restart_case(Path(sim.case_dir), new_params)
+        new_solver_type = SimulatorType.unsteady
+
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'steady' or 'unsteady'")
 
     runner = get_runner()
     if isinstance(runner, ClusterRunner):
@@ -235,7 +270,8 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
         job_name=f"cwt_{sim.id}_r",
     )
 
-    sim.parameters = {**sim.parameters, "end_time": body.new_end_time}
+    sim.parameters = new_params
+    sim.solver_type = new_solver_type
     sim.job_id = job_id
     sim.status = SimulationStatus.running
     sim.started_at = datetime.now(timezone.utc)

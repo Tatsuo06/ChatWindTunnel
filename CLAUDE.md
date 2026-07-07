@@ -219,7 +219,15 @@ For **realizableKE**:
 - Key params written by case_builder: `flowVelocity`, `turbulentKE`, `turbulentOmega`, `endTime`, `numberOfSubdomains`, snappyHexMesh refinement levels, `forceCoeffs` Aref/lRef/CofR
 - Outputs: `postProcessing/cuttingPlane/` (p,U on y=0), `postProcessing/streamLines/`, `postProcessing/forceCoeffs1/`
 
-### Unsteady (motorBike_LES / pisoFoam + DDES)
+### Unsteady (LES) — steady→LES restart workflow (primary)
+**All new cases start STEADY** (the new-case form and chat tools no longer offer UNSTEADY). A finished steady kOmegaSST case is transitioned to LES from the Run tab's restart expander, which offers two modes: "extend steady" (existing endTime extension) and "transition to LES".
+
+- LES models: `kOmegaSSTDDES` (default) or `kOmegaSSTIDDES` — they use the same k/omega/nut fields the steady kOmegaSST run produced, so the converged steady solution seeds the LES directly with **no separate RAS phase**. IDDES requires `delta IDDESDelta` (fatal error otherwise); DDES uses `cubeRootVol`. Configs live in `foam_templates/lesFiles_kOmegaSST/` (`turbulenceProperties` for DDES, `turbulenceProperties.IDDES` for IDDES).
+- `POST /simulations/{id}/job/restart` with `mode="unsteady"` + `les_end_time/les_delta_t/les_anim_interval/les_model`. Guards: steady + DONE + `turbulence_model == kOmegaSST` only. On submit the DB `solver_type` flips to UNSTEADY, so all existing phase-aware display (progress, per-phase residuals, force-coefficient Phase split, phase times, animations) works unchanged — Phase 1 = the steady run's `log.simpleFoam`, Phase 2 = the restart's `log.pisoFoam`.
+- `case_builder.build_les_restart_case()` prepares `.les`-suffixed configs, timeStep-controlled cuttingPlane/streamLines (animation frames), merges les_* params into `case_params.json`, and installs `_ALLRUN_LES_RESTART`: it seeds LES time 0 from the latest processor time dir (erroring out if only time 0 exists, i.e. the steady run never wrote), removes leftover steady time dirs (they would shadow the LES times in latest-time pickers), clears steady cuttingPlane/streamLine postProcessing output for the same reason, and re-runs reconstruct/foamToVTK/cuttingPlane after pisoFoam (the steady logs are removed first so `runApplication` doesn't skip them).
+- Cluster restarts work because `_rsync_up` excludes `processor[0-9]*` — rsync's `--exclude` also protects those remote dirs from `--delete`, so the decomposed steady solution survives the restart upload.
+
+### Legacy unsteady (motorBike_LES / SpalartAllmaras 2-phase) — kept for viewing old cases
 - Phase 1: SpalartAllmaras RAS with simpleFoam. Iteration count follows the `end_time` parameter (default 500); `writeInterval` is set equal to `endTime` so the final state is always written for the phase swap.
 - Phase 2: Copy the latest `processor*/<time>` to `processor*/0`, swap `lesFiles/` configs into system/ and constant/ (prepared as `.les`-suffixed files by `case_builder._prepare_les_files`), run pisoFoam.
 - LES model: SpalartAllmarasDDES. `endTime`/`deltaT` follow the `les_end_time`/`les_delta_t` parameters (defaults 0.7 s / 1e-4 s); `writeInterval` (timeStep-based, template 1000) is capped at the total step count so short runs still write.
