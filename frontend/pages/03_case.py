@@ -155,7 +155,7 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
         # source_rate means kg/s here (Phase-A relative values don't carry over)
         gas_params = {k: v for k, v in params.items() if k != "source_rate"}
         gas = _gas_settings_widgets(
-            gas_params, key_prefix="gr_",
+            gas_params, key_prefix=f"gr_{sim_id}_",
             rate_label_key="source_rate_abs",
             rate_help_key="source_rate_help_gas",
             rate_default=1e-4, rate_step=1e-4, rate_format="%.5f",
@@ -166,48 +166,48 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
             gas_end = st.number_input(
                 t("gas_end_time_lbl"),
                 value=float(params.get("gas_end_time", params.get("les_end_time", 0.7))),
-                min_value=0.001, step=0.1, format="%.4f", key="gr_end",
+                min_value=0.001, step=0.1, format="%.4f", key=f"gr_end_{sim_id}",
             )
         with gc2:
             gas_dt = st.number_input(
                 t("gas_delta_t_lbl"),
                 value=float(params.get("gas_delta_t", params.get("les_delta_t", 1e-4))),
-                min_value=1e-6, step=1e-5, format="%.6f", key="gr_dt",
+                min_value=1e-6, step=1e-5, format="%.6f", key=f"gr_dt_{sim_id}",
             )
         with gc3:
             gas_model = st.selectbox(
                 t("les_model_lbl"),
                 ["kOmegaSSTDDES", "kOmegaSSTIDDES"],
                 index=0 if params.get("les_model") != "kOmegaSSTIDDES" else 1,
-                key="gr_model",
+                key=f"gr_model_{sim_id}",
             )
         gs1, gs2 = st.columns(2)
         with gs1:
             gas_start = st.number_input(
                 t("gas_source_start_time_lbl"),
                 value=float(params.get("gas_source_start_time", 0.0)),
-                min_value=0.0, step=0.05, format="%.4f", key="gr_start",
+                min_value=0.0, step=0.05, format="%.4f", key=f"gr_start_{sim_id}",
                 help=t("gas_source_start_time_help"),
             )
         with gs2:
             gas_stop = st.number_input(
                 t("gas_source_stop_time_lbl"),
                 value=float(params.get("gas_source_stop_time", 0.6)),
-                min_value=0.0, step=0.05, format="%.4f", key="gr_stop",
+                min_value=0.0, step=0.05, format="%.4f", key=f"gr_stop_{sim_id}",
                 help=t("gas_source_stop_time_help"),
             )
         gas_anim = st.number_input(
             t("les_anim_interval_lbl"),
             value=int(params.get("les_anim_interval", 100)),
-            min_value=1, step=10, key="gr_anim",
+            min_value=1, step=10, key=f"gr_anim_{sim_id}",
             help=t("anim_interval_help"),
         )
         child_name = st.text_input(
             t("child_case_name"),
             value=f"{sim.get('name', '')} — GAS",
-            key="gr_child_name",
+            key=f"gr_child_name_{sim_id}",
         )
-        if st.button(t("restart_gas_btn"), key="gr_btn", width="stretch"):
+        if st.button(t("restart_gas_btn"), key=f"gr_btn_{sim_id}", width="stretch"):
             if not child_name.strip():
                 st.error(t("child_case_name_required"))
             elif gas_start >= gas_end:
@@ -244,13 +244,16 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
     warmup = st.number_input(
         t("les_warmup_time_lbl"),
         value=float(params.get("les_warmup_time", 0.05)),
-        min_value=0.0, step=0.01, format="%.4f", key="grs_warmup",
+        min_value=0.0, step=0.01, format="%.4f", key=f"grs_warmup_{sim_id}",
         help=t("les_warmup_time_help"),
     )
     if warmup > 0:
         st.caption(t("les_warmup_note"))
+    # Drop the steady parent's source_rate (relative units) so the kg/s rate
+    # defaults to rate_default rather than the parent's value.
+    gas_params = {k: v for k, v in params.items() if k != "source_rate"}
     gas = _gas_settings_widgets(
-        params, key_prefix="grs_",
+        gas_params, key_prefix=f"grs_{sim_id}_",
         rate_label_key="source_rate_abs",
         rate_help_key="source_rate_help_gas",
         rate_default=1e-4, rate_step=1e-4, rate_format="%.5f",
@@ -261,47 +264,47 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
         gas_end = st.number_input(
             t("gas_end_time_lbl"),
             value=float(params.get("gas_end_time", 0.7)),
-            min_value=0.001, step=0.1, format="%.4f", key="grs_end",
+            min_value=0.001, step=0.1, format="%.4f", key=f"grs_end_{sim_id}",
         )
     with gc2:
         gas_dt = st.number_input(
             t("gas_delta_t_lbl"),
             value=float(params.get("gas_delta_t", 1e-4)),
-            min_value=1e-6, step=1e-5, format="%.6f", key="grs_dt",
+            min_value=1e-6, step=1e-5, format="%.6f", key=f"grs_dt_{sim_id}",
         )
     gc3, gc4 = st.columns(2)
     with gc3:
         gas_start = st.number_input(
             t("gas_source_start_time_lbl"),
             value=float(params.get("gas_source_start_time", 0.1)),
-            min_value=0.0, step=0.05, format="%.4f", key="grs_start",
+            min_value=0.0, step=0.05, format="%.4f", key=f"grs_start_{sim_id}",
             help=t("gas_source_start_time_help"),
         )
     with gc4:
         gas_stop = st.number_input(
             t("gas_source_stop_time_lbl"),
             value=float(params.get("gas_source_stop_time", 0.6)),
-            min_value=0.0, step=0.05, format="%.4f", key="grs_stop",
+            min_value=0.0, step=0.05, format="%.4f", key=f"grs_stop_{sim_id}",
             help=t("gas_source_stop_time_help"),
         )
     gm1, gm2 = st.columns(2)
     with gm1:
         gas_model = st.selectbox(
-            t("les_model_lbl"), ["kOmegaSSTDDES", "kOmegaSSTIDDES"], key="grs_model",
+            t("les_model_lbl"), ["kOmegaSSTDDES", "kOmegaSSTIDDES"], key=f"grs_model_{sim_id}",
         )
     with gm2:
         gas_anim = st.number_input(
             t("les_anim_interval_lbl"),
             value=int(params.get("les_anim_interval", 100)),
-            min_value=1, step=10, key="grs_anim",
+            min_value=1, step=10, key=f"grs_anim_{sim_id}",
             help=t("anim_interval_help"),
         )
     child_name = st.text_input(
         t("child_case_name"),
         value=f"{sim.get('name', '')} — GAS",
-        key="grs_child_name",
+        key=f"grs_child_name_{sim_id}",
     )
-    if st.button(t("restart_gas_btn"), key="grs_btn", width="stretch"):
+    if st.button(t("restart_gas_btn"), key=f"grs_btn_{sim_id}", width="stretch"):
         if not child_name.strip():
             st.error(t("child_case_name_required"))
         elif gas_start >= gas_end:
@@ -332,7 +335,7 @@ def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> N
             mode_sel = st.radio(
                 t("restart_mode"),
                 [t("restart_mode_steady"), t("restart_mode_les"), t("restart_mode_gas")],
-                horizontal=True, key="restart_mode",
+                horizontal=True, key=f"restart_mode_{sim_id}",
             )
         les_selected = mode_sel == t("restart_mode_les")
         gas_selected = mode_sel == t("restart_mode_gas")
@@ -347,16 +350,16 @@ def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> N
                 min_value=1,
                 value=500,
                 step=100,
-                key="restart_add_steps_input",
+                key=f"restart_add_steps_input_{sim_id}",
             )
             new_end = current_end + int(add_steps)
             st.caption(f"{t('restart_new_end')}: {new_end}")
             child_name = st.text_input(
                 t("child_case_name"),
                 value=f"{sim.get('name', '')} — {new_end}it",
-                key="restart_child_name",
+                key=f"restart_child_name_{sim_id}",
             )
-            if st.button(t("restart_job"), key="restart_btn", width="stretch"):
+            if st.button(t("restart_job"), key=f"restart_btn_{sim_id}", width="stretch"):
                 if not child_name.strip():
                     st.error(t("child_case_name_required"))
                 else:
@@ -379,33 +382,33 @@ def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> N
                 les_end = st.number_input(
                     t("les_end_time"),
                     value=float(params.get("les_end_time", 0.7)),
-                    min_value=0.001, step=0.1, format="%.4f", key="restart_les_end",
+                    min_value=0.001, step=0.1, format="%.4f", key=f"restart_les_end_{sim_id}",
                 )
             with lc2:
                 les_dt = st.number_input(
                     t("les_delta_t"),
                     value=float(params.get("les_delta_t", 1e-4)),
-                    min_value=1e-6, step=1e-5, format="%.6f", key="restart_les_dt",
+                    min_value=1e-6, step=1e-5, format="%.6f", key=f"restart_les_dt_{sim_id}",
                 )
             lc3, lc4 = st.columns(2)
             with lc3:
                 les_anim = st.number_input(
                     t("les_anim_interval_lbl"),
                     value=int(params.get("les_anim_interval", 100)),
-                    min_value=1, step=10, key="restart_les_anim",
+                    min_value=1, step=10, key=f"restart_les_anim_{sim_id}",
                 )
             with lc4:
                 les_model = st.selectbox(
                     t("les_model_lbl"),
                     ["kOmegaSSTDDES", "kOmegaSSTIDDES"],
-                    key="restart_les_model",
+                    key=f"restart_les_model_{sim_id}",
                 )
             child_name = st.text_input(
                 t("child_case_name"),
                 value=f"{sim.get('name', '')} — LES({'IDDES' if les_model == 'kOmegaSSTIDDES' else 'DDES'})",
-                key="restart_les_child_name",
+                key=f"restart_les_child_name_{sim_id}",
             )
-            if st.button(t("restart_les_btn"), key="restart_les_btn", width="stretch"):
+            if st.button(t("restart_les_btn"), key=f"restart_les_btn_{sim_id}", width="stretch"):
                 if not child_name.strip():
                     st.error(t("child_case_name_required"))
                 else:
