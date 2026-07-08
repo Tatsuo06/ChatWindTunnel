@@ -262,18 +262,27 @@ def main():
         st.divider()
 
         summary = get_status_summary()
-        cluster_running = summary.get("CLUSTER_RUNNING", 0)
-        cluster_queued  = summary.get("QUEUED", 0)
-        if cluster_running == 0 and cluster_queued == 0:
-            cluster_running = summary.get("MESHING", 0) + summary.get("RUNNING", 0)
-            cluster_queued  = 0
-        if cluster_running or cluster_queued:
+        running_all = summary.get("CLUSTER_RUNNING_ALL")
+        if running_all is not None:
+            # Cluster runner active — show cluster-wide load (all users)
+            free_nodes  = summary.get("FREE_NODES")
+            total_nodes = summary.get("TOTAL_NODES") or 0
+            cluster_queued = summary.get("QUEUED", 0)
             st.caption(t("cluster_status"))
-            if cluster_running:
-                st.markdown(f"🟡 {t('running')} **{cluster_running}**")
+            st.markdown(f"🟡 {t('running_all')} **{running_all}**")
+            if free_nodes is not None:
+                nodes_txt = f"{free_nodes} / {total_nodes}" if total_nodes else f"{free_nodes}"
+                st.markdown(f"🟢 {t('free_nodes')} **{nodes_txt}**")
             if cluster_queued:
                 st.markdown(f"🔵 {t('queued')} **{cluster_queued}**")
             st.divider()
+        else:
+            # Local runner / cluster unreachable — fall back to DB active counts
+            cluster_running = summary.get("MESHING", 0) + summary.get("RUNNING", 0)
+            if cluster_running:
+                st.caption(t("cluster_status"))
+                st.markdown(f"🟡 {t('running')} **{cluster_running}**")
+                st.divider()
 
     pg = st.navigation(pages, position="sidebar")
     pg.run()

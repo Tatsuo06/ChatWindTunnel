@@ -226,6 +226,7 @@ async def job_progress(sim_id: int, current_user: CurrentUser, db: DB):
 
 class RestartRequest(BaseModel):
     mode: str = "steady"           # "steady" = extend | "unsteady" = to LES | "gas" = to gas-dispersion LES
+    name: str = ""                 # child case name (required)
     new_end_time: int | None = None
     les_end_time: float | None = None
     les_delta_t: float | None = None
@@ -237,116 +238,193 @@ class RestartRequest(BaseModel):
     gas_density_ratio: float | None = None
     source_position: list | None = None
     source_rate: float | None = None
+    gas_source_start_time: float | None = None
+    gas_source_stop_time: float | None = None
+    les_warmup_time: float | None = None   # steady->gas: aero-LES warm-up before gas (0 = direct)
 
 
 @router.post("/restart", response_model=JobStatusResponse)
 async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUser, db: DB):
-    """Restart a finished case: extend steady, transition to LES, or to gas-dispersion LES."""
+    """Restart a finished case as a NEW child case: extend steady, transition
+    to LES, or to gas-dispersion LES.
+
+    The parent case is never modified — a new Simulation row + case directory is
+    created, its mesh + converged solution seeded from the parent's decomposed
+    processor* dirs. This lets a single parent spawn several children (e.g. LES
+    DDES vs IDDES) and each child be deleted independently.
+    """
+    import shutil
     from backend.foam.case_builder import (
-        build_les_restart_case, build_gas_les_restart_case, LES_RESTART_MODELS,
+        build_les_restart_case, build_gas_les_restart_case, build_warmup_gas_case,
+        copy_case_for_restart, LES_RESTART_MODELS,
     )
 
-    sim = await _get_sim_with_geo(sim_id, db)
-    if current_user.role != UserRole.admin and sim.geometry.project.owner_id != current_user.id:
+    parent = await _get_sim_with_geo(sim_id, db)
+    if current_user.role != UserRole.admin and parent.geometry.project.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
-    if sim.status not in (SimulationStatus.done, SimulationStatus.failed):
+    if parent.status not in (SimulationStatus.done, SimulationStatus.failed):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only restart DONE or FAILED jobs")
-    if not sim.case_dir:
+    if not parent.case_dir:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No case directory found")
-    if body.mode in ("steady", "unsteady") and sim.solver_type != SimulatorType.steady:
+    child_name = (body.name or "").strip()
+    if not child_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Child case name is required")
+    if body.mode in ("steady", "unsteady") and parent.solver_type != SimulatorType.steady:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Restart only supported for steady-state simulations")
 
+    # Validate per mode and prepare new_params / new_solver_type / a builder that
+    # runs against the child dir (created after these checks pass).
     if body.mode == "steady":
         if body.new_end_time is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="new_end_time is required for steady restart")
-        build_restart_case(Path(sim.case_dir), body.new_end_time)
-        new_params = {**sim.parameters, "end_time": body.new_end_time}
-        new_solver_type = sim.solver_type
+        _new_end = body.new_end_time
+        new_params = {**parent.parameters, "end_time": _new_end}
+        new_solver_type = parent.solver_type
+
+        def _build(child_dir: Path):
+            build_restart_case(child_dir, _new_end)
 
     elif body.mode == "unsteady":
-        if sim.status != SimulationStatus.done:
+        if parent.status != SimulationStatus.done:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="LES transition requires a completed (DONE) steady run")
-        turb = sim.parameters.get("turbulence_model", "kOmegaSST")
+        turb = parent.parameters.get("turbulence_model", "kOmegaSST")
         if turb != "kOmegaSST":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"LES transition requires a kOmegaSST steady solution (this case used {turb})")
         if body.les_model not in LES_RESTART_MODELS:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"les_model must be one of {LES_RESTART_MODELS}")
-        new_params = {**sim.parameters, "les_model": body.les_model}
+        new_params = {**parent.parameters, "les_model": body.les_model}
         for key, val in (("les_end_time", body.les_end_time),
                          ("les_delta_t", body.les_delta_t),
                          ("les_anim_interval", body.les_anim_interval)):
             if val is not None:
                 new_params[key] = val
-        build_les_restart_case(Path(sim.case_dir), new_params)
         new_solver_type = SimulatorType.unsteady
 
+        def _build(child_dir: Path):
+            build_les_restart_case(child_dir, new_params)
+
     elif body.mode == "gas":
-        if sim.solver_type != SimulatorType.unsteady:
+        if parent.status != SimulationStatus.done:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Gas-dispersion restart requires a completed LES (unsteady) case")
-        if sim.status != SimulationStatus.done:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Gas-dispersion restart requires a completed (DONE) LES run")
-        if sim.parameters.get("gas_les"):
+                                detail="Gas-dispersion restart requires a completed (DONE) run")
+        if parent.parameters.get("gas_les"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="This case already ran the gas-dispersion stage")
-        les_model = sim.parameters.get("les_model")
-        if les_model not in LES_RESTART_MODELS:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Gas-dispersion restart requires a kOmegaSST-DES aero LES "
-                                       f"(this case used {les_model})")
-        gas_model = body.gas_model or les_model
+        # Two entry points to gas dispersion, both producing an UNSTEADY gas child:
+        #  - from a finished aero LES (DES): emission usually immediate
+        #  - from a finished steady kOmegaSST: one rhoReactingBuoyantFoam run that
+        #    develops turbulence gas-free then emits at gas_source_start_time
+        if parent.solver_type == SimulatorType.unsteady:
+            les_model = parent.parameters.get("les_model")
+            if les_model not in LES_RESTART_MODELS:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail="Gas-dispersion restart requires a kOmegaSST-DES aero LES "
+                                           f"(this case used {les_model})")
+            gas_model = body.gas_model or les_model
+        else:  # steady parent
+            turb = parent.parameters.get("turbulence_model", "kOmegaSST")
+            if turb != "kOmegaSST":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail="Direct gas-dispersion restart requires a kOmegaSST steady "
+                                           f"solution (this case used {turb})")
+            gas_model = body.gas_model or "kOmegaSSTDDES"
         if gas_model not in LES_RESTART_MODELS:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"gas_model must be one of {LES_RESTART_MODELS}")
         gas_end = body.gas_end_time if body.gas_end_time is not None else 0.7
         gas_dt = body.gas_delta_t if body.gas_delta_t is not None else 1e-4
+        gas_start = body.gas_source_start_time if body.gas_source_start_time is not None else 0.0
+        gas_stop = body.gas_source_stop_time if body.gas_source_stop_time is not None else 0.0
         new_params = {
-            **sim.parameters,
+            **parent.parameters,
             "gas_les": True,
             "gas_end_time": gas_end,
             "gas_delta_t": gas_dt,
             "gas_model": gas_model,
+            "gas_source_start_time": gas_start,
+            "gas_source_stop_time": gas_stop,
+            "les_model": gas_model,
             "les_end_time": gas_end,
             "les_delta_t": gas_dt,
         }
+        if body.les_anim_interval is not None:
+            new_params["les_anim_interval"] = body.les_anim_interval
         if body.gas_density_ratio is not None:
             new_params["gas_density_ratio"] = body.gas_density_ratio
         if body.source_position is not None:
             new_params["source_position"] = body.source_position
         if body.source_rate is not None:
             new_params["source_rate"] = body.source_rate
-        build_gas_les_restart_case(Path(sim.case_dir), new_params)
-        new_solver_type = sim.solver_type
+        new_solver_type = SimulatorType.unsteady
+
+        # From a steady parent, an optional aero-LES warm-up develops turbulence
+        # before the compressible gas stage (the direct-from-RANS seed stalls).
+        warmup = body.les_warmup_time or 0.0
+        _use_warmup = (parent.solver_type == SimulatorType.steady and warmup > 0)
+        if _use_warmup:
+            new_params["les_warmup_time"] = warmup
+
+        def _build(child_dir: Path):
+            if _use_warmup:
+                build_warmup_gas_case(child_dir, new_params)
+            else:
+                build_gas_les_restart_case(child_dir, new_params)
 
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'steady', 'unsteady' or 'gas'")
+
+    # Create the child Simulation row (independent case, references the parent).
+    child = Simulation(
+        geometry_id=parent.geometry_id,
+        parent_id=parent.id,
+        name=child_name,
+        solver_type=new_solver_type,
+        status=SimulationStatus.pending,
+        parameters=new_params,
+        yaw_deg=parent.yaw_deg,
+        pitch_deg=parent.pitch_deg,
+        roll_deg=parent.roll_deg,
+    )
+    db.add(child)
+    await db.flush()          # assign child.id
+    child.case_dir = str(settings.CASES_DIR / str(child.id))
+
+    parent_dir = Path(parent.case_dir)
+    child_dir = Path(child.case_dir)
 
     runner = get_runner()
     if isinstance(runner, ClusterRunner):
         n_processors = settings.CLUSTER_N_PROCESSORS
     else:
         import os
-        n_processors = min(int(sim.parameters.get("n_processors", 6)), os.cpu_count() or 6)
-    job_id = runner.submit(
-        case_dir=Path(sim.case_dir),
-        n_processors=n_processors,
-        job_name=f"cwt_{sim.id}_r",
-    )
+        n_processors = min(int(parent.parameters.get("n_processors", 6)), os.cpu_count() or 6)
 
-    sim.parameters = new_params
-    sim.solver_type = new_solver_type
-    sim.job_id = job_id
-    sim.status = SimulationStatus.running
-    sim.started_at = datetime.now(timezone.utc)
-    sim.finished_at = None
+    try:
+        copy_case_for_restart(parent_dir, child_dir)
+        _build(child_dir)
+        job_id = runner.submit(
+            case_dir=child_dir,
+            n_processors=n_processors,
+            job_name=f"cwt_{child.id}",
+            seed_processors_from=parent_dir,
+        )
+    except Exception:
+        # Roll back the half-created child so the list doesn't show a stray case
+        await db.rollback()
+        if child_dir.exists():
+            shutil.rmtree(child_dir, ignore_errors=True)
+        raise
+
+    child.job_id = job_id
+    child.status = SimulationStatus.running
+    child.started_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(sim)
+    await db.refresh(child)
 
-    return JobStatusResponse(sim_id=sim.id, status=sim.status, job_id=job_id)
+    return JobStatusResponse(sim_id=child.id, status=child.status, job_id=job_id)
 
 
 @router.post("/cancel", status_code=status.HTTP_204_NO_CONTENT)

@@ -33,8 +33,12 @@ def phase_logs(case_dir: Path, solver_type: SimulatorType) -> list[dict]:
     if solver_type == SimulatorType.unsteady:
         entries = [
             {"phase": 1, "label": "Phase 1 (RAS)", "log": _first_existing_log(case_dir, PHASE1_LOGS), "unit": "iteration"},
-            {"phase": 2, "label": "Phase 2 (LES)", "log": _first_existing_log(case_dir, PHASE2_LOGS), "unit": "s"},
         ]
+        # Phase 2 (aero LES / pisoFoam) only exists for LES cases; a case that
+        # goes straight from steady to gas dispersion has no pisoFoam log.
+        piso_log = _first_existing_log(case_dir, PHASE2_LOGS)
+        if piso_log.exists():
+            entries.append({"phase": 2, "label": "Phase 2 (LES)", "log": piso_log, "unit": "s"})
         gas_log = _first_existing_log(case_dir, PHASE3_LOGS)
         if gas_log.exists():
             entries.append({"phase": 3, "label": "Phase 3 (Gas LES)", "log": gas_log, "unit": "s"})

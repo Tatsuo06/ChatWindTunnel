@@ -29,6 +29,17 @@ endTime         0.7;
 
 deltaT          1e-4;
 
+// Courant-adaptive stepping: seeding a transient compressible LES from a
+// steady field gives a violent start-up. A fixed step lets the local Courant
+// number spike (seen ~400) and the run diverges (k/omega blow up -> FPE).
+// The step shrinks to hold the Courant number bounded, then grows back to the
+// requested ceiling once settled. (Do NOT name the edited keys in this comment.)
+adjustTimeStep  yes;
+
+maxCo           1.0;
+
+maxDeltaT       1e-4;
+
 writeControl    timeStep;
 
 writeInterval   1000;
@@ -50,6 +61,7 @@ runTimeModifiable true;
 
 functions
 {
+    #include "forceCoeffs"
     #include "cuttingPlane"
     #include "streamLines"
 }

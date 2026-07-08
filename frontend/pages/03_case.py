@@ -181,14 +181,144 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
                 index=0 if params.get("les_model") != "kOmegaSSTIDDES" else 1,
                 key="gr_model",
             )
+        gs1, gs2 = st.columns(2)
+        with gs1:
+            gas_start = st.number_input(
+                t("gas_source_start_time_lbl"),
+                value=float(params.get("gas_source_start_time", 0.0)),
+                min_value=0.0, step=0.05, format="%.4f", key="gr_start",
+                help=t("gas_source_start_time_help"),
+            )
+        with gs2:
+            gas_stop = st.number_input(
+                t("gas_source_stop_time_lbl"),
+                value=float(params.get("gas_source_stop_time", 0.6)),
+                min_value=0.0, step=0.05, format="%.4f", key="gr_stop",
+                help=t("gas_source_stop_time_help"),
+            )
+        gas_anim = st.number_input(
+            t("les_anim_interval_lbl"),
+            value=int(params.get("les_anim_interval", 100)),
+            min_value=1, step=10, key="gr_anim",
+            help=t("anim_interval_help"),
+        )
+        child_name = st.text_input(
+            t("child_case_name"),
+            value=f"{sim.get('name', '')} — GAS",
+            key="gr_child_name",
+        )
         if st.button(t("restart_gas_btn"), key="gr_btn", width="stretch"):
+            if not child_name.strip():
+                st.error(t("child_case_name_required"))
+            elif gas_start >= gas_end:
+                st.error(t("gas_start_after_end"))
+            elif gas_stop > 0 and gas_stop <= gas_start:
+                st.error(t("gas_stop_before_start"))
+            else:
+                with st.spinner(t("restarting")):
+                    result = api.restart_job_gas(
+                        sim_id, child_name.strip(), gas_end, gas_dt, gas_model,
+                        gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
+                        gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
+                        les_anim_interval=int(gas_anim),
+                    )
+                if result:
+                    st.success(t("restart_ok", result.get("job_id")))
+                    st.session_state["sim_id"] = result.get("sim_id")
+                    st.rerun()
+                else:
+                    st.error(t("restart_fail"))
+
+
+def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
+    """Steady → gas-dispersion LES in one restart, with a delayed emission start.
+
+    A single rhoReactingBuoyantFoam run seeded from the steady solution; the LES
+    develops turbulence gas-free until gas_source_start_time, then emits.
+    """
+    turb = params.get("turbulence_model", "kOmegaSST")
+    if turb != "kOmegaSST":
+        st.warning(t("restart_les_kosst_only", turb))
+        return
+    st.caption(t("restart_gas_direct_note"))
+    warmup = st.number_input(
+        t("les_warmup_time_lbl"),
+        value=float(params.get("les_warmup_time", 0.05)),
+        min_value=0.0, step=0.01, format="%.4f", key="grs_warmup",
+        help=t("les_warmup_time_help"),
+    )
+    if warmup > 0:
+        st.caption(t("les_warmup_note"))
+    gas = _gas_settings_widgets(
+        params, key_prefix="grs_",
+        rate_label_key="source_rate_abs",
+        rate_help_key="source_rate_help_gas",
+        rate_default=1e-4, rate_step=1e-4, rate_format="%.5f",
+    )
+    st.caption(t("source_rate_note_gas"))
+    gc1, gc2 = st.columns(2)
+    with gc1:
+        gas_end = st.number_input(
+            t("gas_end_time_lbl"),
+            value=float(params.get("gas_end_time", 0.7)),
+            min_value=0.001, step=0.1, format="%.4f", key="grs_end",
+        )
+    with gc2:
+        gas_dt = st.number_input(
+            t("gas_delta_t_lbl"),
+            value=float(params.get("gas_delta_t", 1e-4)),
+            min_value=1e-6, step=1e-5, format="%.6f", key="grs_dt",
+        )
+    gc3, gc4 = st.columns(2)
+    with gc3:
+        gas_start = st.number_input(
+            t("gas_source_start_time_lbl"),
+            value=float(params.get("gas_source_start_time", 0.1)),
+            min_value=0.0, step=0.05, format="%.4f", key="grs_start",
+            help=t("gas_source_start_time_help"),
+        )
+    with gc4:
+        gas_stop = st.number_input(
+            t("gas_source_stop_time_lbl"),
+            value=float(params.get("gas_source_stop_time", 0.6)),
+            min_value=0.0, step=0.05, format="%.4f", key="grs_stop",
+            help=t("gas_source_stop_time_help"),
+        )
+    gm1, gm2 = st.columns(2)
+    with gm1:
+        gas_model = st.selectbox(
+            t("les_model_lbl"), ["kOmegaSSTDDES", "kOmegaSSTIDDES"], key="grs_model",
+        )
+    with gm2:
+        gas_anim = st.number_input(
+            t("les_anim_interval_lbl"),
+            value=int(params.get("les_anim_interval", 100)),
+            min_value=1, step=10, key="grs_anim",
+            help=t("anim_interval_help"),
+        )
+    child_name = st.text_input(
+        t("child_case_name"),
+        value=f"{sim.get('name', '')} — GAS",
+        key="grs_child_name",
+    )
+    if st.button(t("restart_gas_btn"), key="grs_btn", width="stretch"):
+        if not child_name.strip():
+            st.error(t("child_case_name_required"))
+        elif gas_start >= gas_end:
+            st.error(t("gas_start_after_end"))
+        elif gas_stop > 0 and gas_stop <= gas_start:
+            st.error(t("gas_stop_before_start"))
+        else:
             with st.spinner(t("restarting")):
                 result = api.restart_job_gas(
-                    sim_id, gas_end, gas_dt, gas_model,
+                    sim_id, child_name.strip(), gas_end, gas_dt, gas_model,
                     gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
+                    gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
+                    les_anim_interval=int(gas_anim), les_warmup_time=float(warmup),
                 )
             if result:
                 st.success(t("restart_ok", result.get("job_id")))
+                st.session_state["sim_id"] = result.get("sim_id")
                 st.rerun()
             else:
                 st.error(t("restart_fail"))
@@ -197,16 +327,19 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
 def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> None:
     with st.expander(t("restart_job"), expanded=False):
         params = sim.get("parameters", {})
-        les_selected = False
+        mode_sel = t("restart_mode_steady")
         if allow_les:
-            mode = st.radio(
+            mode_sel = st.radio(
                 t("restart_mode"),
-                [t("restart_mode_steady"), t("restart_mode_les")],
+                [t("restart_mode_steady"), t("restart_mode_les"), t("restart_mode_gas")],
                 horizontal=True, key="restart_mode",
             )
-            les_selected = mode == t("restart_mode_les")
+        les_selected = mode_sel == t("restart_mode_les")
+        gas_selected = mode_sel == t("restart_mode_gas")
 
-        if not les_selected:
+        if gas_selected:
+            _show_gas_direct_form(sim, sim_id, params)
+        elif not les_selected:
             current_end = int(params.get("end_time", 500))
             st.caption(f"{t('restart_current_end')}: {current_end}")
             add_steps = st.number_input(
@@ -218,14 +351,23 @@ def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> N
             )
             new_end = current_end + int(add_steps)
             st.caption(f"{t('restart_new_end')}: {new_end}")
+            child_name = st.text_input(
+                t("child_case_name"),
+                value=f"{sim.get('name', '')} — {new_end}it",
+                key="restart_child_name",
+            )
             if st.button(t("restart_job"), key="restart_btn", width="stretch"):
-                with st.spinner(t("restarting")):
-                    result = api.restart_job(sim_id, new_end)
-                if result:
-                    st.success(t("restart_ok", result.get("job_id")))
-                    st.rerun()
+                if not child_name.strip():
+                    st.error(t("child_case_name_required"))
                 else:
-                    st.error(t("restart_fail"))
+                    with st.spinner(t("restarting")):
+                        result = api.restart_job(sim_id, child_name.strip(), new_end)
+                    if result:
+                        st.success(t("restart_ok", result.get("job_id")))
+                        st.session_state["sim_id"] = result.get("sim_id")
+                        st.rerun()
+                    else:
+                        st.error(t("restart_fail"))
         else:
             turb = params.get("turbulence_model", "kOmegaSST")
             if turb != "kOmegaSST":
@@ -258,14 +400,45 @@ def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> N
                     ["kOmegaSSTDDES", "kOmegaSSTIDDES"],
                     key="restart_les_model",
                 )
+            child_name = st.text_input(
+                t("child_case_name"),
+                value=f"{sim.get('name', '')} — LES({'IDDES' if les_model == 'kOmegaSSTIDDES' else 'DDES'})",
+                key="restart_les_child_name",
+            )
             if st.button(t("restart_les_btn"), key="restart_les_btn", width="stretch"):
-                with st.spinner(t("restarting")):
-                    result = api.restart_job_les(sim_id, les_end, les_dt, int(les_anim), les_model)
-                if result:
-                    st.success(t("restart_ok", result.get("job_id")))
-                    st.rerun()
+                if not child_name.strip():
+                    st.error(t("child_case_name_required"))
                 else:
-                    st.error(t("restart_fail"))
+                    with st.spinner(t("restarting")):
+                        result = api.restart_job_les(
+                            sim_id, child_name.strip(), les_end, les_dt, int(les_anim), les_model)
+                    if result:
+                        st.success(t("restart_ok", result.get("job_id")))
+                        st.session_state["sim_id"] = result.get("sim_id")
+                        st.rerun()
+                    else:
+                        st.error(t("restart_fail"))
+
+
+def _ordered_with_depth(sims: list[dict]) -> list[tuple[dict, int]]:
+    """Flatten the case list into (sim, depth) with restart children nested
+    directly under their parent. A sim whose parent is not in this list (or has
+    no parent) is a depth-0 root; sibling order preserves the input order."""
+    ids = {s["id"] for s in sims}
+    children_of: dict = {}
+    for s in sims:
+        pid = s.get("parent_id")
+        children_of.setdefault(pid if pid in ids else None, []).append(s)
+    ordered: list[tuple[dict, int]] = []
+
+    def walk(node_id, depth):
+        for s in children_of.get(node_id, []):
+            ordered.append((s, depth))
+            walk(s["id"], depth + 1)
+
+    walk(None, 0)
+    return ordered
+
 
 if "token" not in st.session_state:
     st.warning(t("login_required"))
@@ -462,7 +635,7 @@ with left:
             st.rerun()
 
     sim_id = st.session_state.get("sim_id")
-    for s in sims:
+    for s, depth in _ordered_with_depth(sims):
         status_icon = {"PENDING": "🔵", "MESHING": "🟡", "RUNNING": "🟡",
                        "DONE": "🟢", "FAILED": "🔴"}.get(s["status"], "⚪")
         is_selected = s["id"] == sim_id
@@ -480,23 +653,31 @@ with left:
                     st.session_state.pop(f"editing_sim_{s['id']}", None)
                     st.rerun()
         else:
-            cols = st.columns([4, 1, 1])
-            with cols[0]:
-                prefix = "▶ " if is_selected else ""
+            # Indent restart children under their parent with a leading spacer
+            if depth > 0:
+                cols = st.columns([depth, 4, 1, 1])
+                label_col, edit_col, del_col = cols[1], cols[2], cols[3]
+            else:
+                cols = st.columns([4, 1, 1])
+                label_col, edit_col, del_col = cols[0], cols[1], cols[2]
+            with label_col:
+                prefix = "▶ " if is_selected else ("↳ " if depth > 0 else "")
                 label  = f"{prefix}{status_icon} {s['name']}"
                 if st.button(label, key=f"sel_{s['id']}", width="stretch"):
                     st.session_state["sim_id"] = s["id"]
                     st.rerun()
-            with cols[1]:
+            with edit_col:
                 if st.button("✏️", key=f"edit_sim_{s['id']}", help=t("rename")):
                     st.session_state[f"editing_sim_{s['id']}"] = True
                     st.rerun()
-            with cols[2]:
+            with del_col:
                 if st.button("🗑", key=f"del_{s['id']}", help=t("delete_case")):
                     if api.delete_simulation(s["id"]):
                         if st.session_state.get("sim_id") == s["id"]:
                             st.session_state.pop("sim_id", None)
                         st.rerun()
+                    else:
+                        st.error(t("delete_case_blocked"))
 
     if not sims:
         st.info(t("no_cases"))
@@ -795,8 +976,20 @@ with right:
 
     # ── Mesh ────────────────────────────────────
     with tab_mesh:
-        if not _is_done:
+        _mesh_live = current_status in ("MESHING", "RUNNING")
+        if sim.get("parent_id"):
+            # Restart children reuse the parent's mesh — nothing to show here.
+            st.info(t("mesh_child_note"))
+        elif not _is_done and not _mesh_live:
             st.info(t("sim_pending_msg"))
+        elif _mesh_live:
+            # The surface mesh is written when the job finishes; refresh polls
+            # the cluster and, once the job is DONE, fetches the mesh.
+            st.caption(t("mesh_live_note"))
+            if st.button(t("refresh"), key="mesh_refresh"):
+                with st.spinner(t("refresh_status")):
+                    api.poll_status(sim_id)
+                st.rerun()
         else:
             st.subheader(t("surface_mesh"))
 
@@ -828,14 +1021,24 @@ with right:
         else:
             if _conv_live:
                 st.caption(t("conv_live_note"))
-                if st.button(t("refresh"), key="conv_refresh", width="stretch"):
+                if st.button(t("refresh"), key="conv_refresh"):
                     with st.spinner(t("refresh_progress")):
                         api.sync_live_results(sim_id)
                     st.rerun()
             st.subheader(t("residuals"))
-            if sim.get("solver_type") == "UNSTEADY":
-                # Stack the phases top to bottom: RAS, LES, and (when the case
-                # was restarted into gas dispersion) the gas LES
+            if sim.get("solver_type") == "UNSTEADY" and sim.get("parent_id"):
+                # Restart child: show only the stage its own run produced. The
+                # parent's earlier history (steady/RAS, ancestor LES) belongs to
+                # the parent case and is viewable there.
+                own_phase = 3 if sim.get("parameters", {}).get("gas_les") else 2
+                img = api.get_residuals_plot(sim_id, phase=own_phase)
+                if img:
+                    st.image(img, width="stretch")
+                else:
+                    st.info(t("log_not_found"))
+            elif sim.get("solver_type") == "UNSTEADY":
+                # Legacy standalone unsteady case: stack the phases top to bottom
+                # (RAS, LES, and — if restarted into gas dispersion — the gas LES)
                 _phases = [(1, t("residuals_phase1")), (2, t("residuals_phase2"))]
                 if sim.get("parameters", {}).get("gas_les"):
                     _phases.append((3, t("residuals_phase3")))

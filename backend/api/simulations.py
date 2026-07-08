@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from backend.api.deps import DB, CurrentUser
@@ -80,6 +80,7 @@ class SimulationUpdate(BaseModel):
 class SimulationResponse(BaseModel):
     id: int
     geometry_id: int
+    parent_id: int | None = None
     name: str
     description: str | None = ""
     solver_type: SimulatorType
@@ -317,9 +318,12 @@ async def status_summary(current_user: CurrentUser, db: DB):
     if isinstance(runner, ClusterRunner):
         loop = asyncio.get_event_loop()
         try:
-            qcounts = await loop.run_in_executor(None, runner.queue_counts)
-            db_counts["QUEUED"] = qcounts.get("queued", 0)
-            db_counts["CLUSTER_RUNNING"] = qcounts.get("running", 0)
+            load = await loop.run_in_executor(None, runner.cluster_load)
+            db_counts["QUEUED"] = load.get("queued", 0)
+            db_counts["CLUSTER_RUNNING"] = load.get("running", 0)
+            db_counts["CLUSTER_RUNNING_ALL"] = load.get("running_all", 0)
+            db_counts["FREE_NODES"] = load.get("free_nodes", 0)
+            db_counts["TOTAL_NODES"] = load.get("total_nodes", 0)
         except Exception:
             pass
 
@@ -426,6 +430,17 @@ async def delete_simulation(sim_id: int, current_user: CurrentUser, db: DB):
 
     sim = await _get_sim(sim_id, db)
     _assert_access(sim, current_user)
+
+    # Block deletion while restart children (LES / gas / steady-extend) exist —
+    # they are independent cases and must be deleted first.
+    n_children = await db.scalar(
+        select(func.count(Simulation.id)).where(Simulation.parent_id == sim_id)
+    )
+    if n_children:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This case has {n_children} child case(s); delete them first",
+        )
 
     case_dir = Path(sim.case_dir) if sim.case_dir else None
 

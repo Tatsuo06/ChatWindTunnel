@@ -64,8 +64,21 @@ def _run_allrun(case_dir: Path, job_id: str) -> None:
 
 
 class LocalRunner(JobRunner):
-    def submit(self, case_dir: Path, n_processors: int, job_name: str) -> str:
+    def submit(self, case_dir: Path, n_processors: int, job_name: str,
+               seed_processors_from: Path | None = None) -> str:
         _foam_cmd()  # raises immediately if OpenFOAM not installed
+
+        # Seed the decomposed solution from the parent case (local copy) so a
+        # restart child continues from the parent's converged solution.
+        if seed_processors_from is not None:
+            import shutil
+            for proc in sorted(Path(seed_processors_from).glob("processor*")):
+                if proc.is_dir() and proc.name[len("processor"):].isdigit():
+                    dest = case_dir / proc.name
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(proc, dest, symlinks=True)
+
         job_id = _next_id()
         with _lock:
             _jobs[job_id] = {"status": "PENDING", "case_dir": str(case_dir)}

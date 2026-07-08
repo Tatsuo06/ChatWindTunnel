@@ -164,7 +164,7 @@ async def geometry_3d_data(sim_id: int, current_user: CurrentUser, db: DB):
     domain = _auto_domain_params(original_stl)
     refbox = {**domain, **_refbox_from_rotated_stl(stl_path)}
     s = domain["domain_scale"]
-    return {
+    result = {
         "stl_path": str(stl_path),
         "domain": {
             "xmin": domain["domain_xmin"] * s,
@@ -183,6 +183,7 @@ async def geometry_3d_data(sim_id: int, current_user: CurrentUser, db: DB):
             "zmax": refbox["refbox_max"][2],
         },
     }
+    return result
 
 
 @router.post("/sync-live")
@@ -226,7 +227,18 @@ async def residuals(sim_id: int, current_user: CurrentUser, db: DB, phase: int |
 
     if not log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No solver log found")
-    return _png(backend.plot_residuals(log))
+
+    # x-axis upper bound = planned endTime for this phase, so the plot shows how
+    # far the run has progressed. Steady/RAS phase counts iterations (end_time);
+    # LES phase 2 runs to les_end_time; gas phase 3 to gas_end_time.
+    params = sim.parameters or {}
+    if sim.solver_type == SimulatorType.steady or phase == 1:
+        x_max = float(params.get("end_time", 0) or 0)
+    elif phase == 3:
+        x_max = float(params.get("gas_end_time", params.get("les_end_time", 0)) or 0)
+    else:  # LES phase 2 (or unspecified unsteady)
+        x_max = float(params.get("les_end_time", 0) or 0)
+    return _png(backend.plot_residuals(log, x_max=x_max or None))
 
 
 @router.get("/force-coefficients")
@@ -235,7 +247,29 @@ async def force_coefficients(sim_id: int, current_user: CurrentUser, db: DB):
     if not sim.case_dir:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
     _maybe_sync_live(sim)
-    return _png(backend.plot_force_coefficients(Path(sim.case_dir)))
+    params = sim.parameters or {}
+    end_time = float(params.get("end_time", 0) or 0)
+    les_end = float(params.get("les_end_time", 0) or 0)
+    gas_end = float(params.get("gas_end_time", les_end) or 0)
+    # Legacy 2-phase unsteady roots keep the per-phase subplot layout; a single
+    # plot (steady root, or an unsteady child showing only its own stage) gets a
+    # unit-correct axis: seconds for unsteady, iterations for steady.
+    phase_end = {1: end_time, 2: les_end, 3: gas_end}
+    clamp_time = None
+    if sim.solver_type == SimulatorType.unsteady:
+        single_x_title = "Time [s]"
+        single_x_max = gas_end if params.get("gas_les") else les_end
+        # A restart child's own force data is in seconds; drop any inherited
+        # parent iterations (Time far beyond the seconds end time).
+        if sim.parent_id:
+            clamp_time = single_x_max
+    else:
+        single_x_title = "Iteration"
+        single_x_max = end_time
+    return _png(backend.plot_force_coefficients(
+        Path(sim.case_dir), only_last_phase=bool(sim.parent_id), phase_end=phase_end,
+        single_x_max=single_x_max or None, single_x_title=single_x_title,
+        clamp_time=clamp_time))
 
 
 @router.get("/cutting-plane")

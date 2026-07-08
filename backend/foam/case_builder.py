@@ -328,6 +328,88 @@ _ALLRUN_LES_RESTART = textwrap.dedent("""\
 """)
 
 
+_ALLRUN_WARMUP_GAS = textwrap.dedent("""\
+    #!/bin/sh
+    cd "${0%/*}" || exit
+    . ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+    # === Phase A: aero-LES warm-up seeded from the steady solution ===
+    # The compressible gas solver is unstable when started straight from a RANS
+    # field (its adaptive dt collapses), so first develop turbulence with the
+    # incompressible pisoFoam LES for a short time, then hand that field to the
+    # gas stage. Phase A writes no function-object output (its controlDict.les
+    # has empty functions) — its cuttingPlane would sample T/GAS which pisoFoam
+    # does not carry.
+    PHASE1_TIME=$(ls processor0 | grep -E "^[0-9]+(\\.[0-9]+)?$" | sort -g | tail -1)
+    if [ -z "$PHASE1_TIME" ] || [ "$PHASE1_TIME" = "0" ]; then
+        echo "ERROR: no written steady solution in processor dirs (latest time: '${PHASE1_TIME}')" >&2
+        exit 1
+    fi
+    ls -d processor* | xargs -I {} sh -c 'cp -r {}/'"$PHASE1_TIME"' {}/0_les; for t in $(ls {} | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf {}/$t; done; mv {}/0_les {}/0; rm -rf {}/0/uniform'
+    for t in $(ls . | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf "./$t"; done
+
+    cp -f system/controlDict.les   system/controlDict
+    cp -f system/fvSchemes.les     system/fvSchemes
+    cp -f system/fvSolution.les    system/fvSolution
+    cp -f constant/turbulenceProperties.les  constant/turbulenceProperties
+
+    rm -f log.pisoFoam log.reconstructParMesh log.reconstructPar log.foamToVTK log.postProcess
+    (
+        while true; do
+            ps aux | grep "[p]isoFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_piso.tmp
+            sleep 5
+        done
+    ) &
+    _MON_PISO=$!
+    runParallel pisoFoam
+    kill $_MON_PISO 2>/dev/null
+    if [ -s log.mem_piso.tmp ]; then
+        peak=$(sort -n log.mem_piso.tmp | tail -1)
+        echo "Peak RSS (all pisoFoam processes): ${peak} kB" > log.mem_piso
+    fi
+    rm -f log.mem_piso.tmp
+
+    # === Phase B: gas-dispersion LES seeded from the warmed-up aero LES field ===
+    GAS_PREV=$(ls processor0 | grep -E "^[0-9]+(\\.[0-9]+)?$" | sort -g | tail -1)
+    if [ -z "$GAS_PREV" ] || [ "$GAS_PREV" = "0" ]; then
+        echo "ERROR: no written LES solution in processor dirs (latest time: '${GAS_PREV}')" >&2
+        exit 1
+    fi
+    [ -d postProcessing ] && mv postProcessing postProcessing_aero
+    ls -d processor* | xargs -I {} sh -c 'cp -r {}/'"$GAS_PREV"' {}/0_gas; for t in $(ls {} | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf {}/$t; done; mv {}/0_gas {}/0; rm -rf {}/0/uniform; rm -f {}/0/p {}/0/phi'
+    for f in gas0/*; do
+        ls -d processor* | xargs -I {} cp "$f" {}/0/
+    done
+    for t in $(ls . | grep -E "^[0-9]+(\\.[0-9]+)?$"); do rm -rf "./$t"; done
+
+    cp -f system/controlDict.gas   system/controlDict
+    cp -f system/fvSchemes.gas     system/fvSchemes
+    cp -f system/fvSolution.gas    system/fvSolution
+    cp -f constant/turbulenceProperties.gas  constant/turbulenceProperties
+
+    rm -f log.rhoReactingBuoyantFoam log.reconstructParMesh log.reconstructPar log.foamToVTK log.postProcess
+    (
+        while true; do
+            ps aux | grep "[r]hoReactingBuoyantFoam" | awk '{sum+=$6} END {if(sum>0) print sum}' >> log.mem_gas.tmp
+            sleep 5
+        done
+    ) &
+    _MON_GAS=$!
+    runParallel rhoReactingBuoyantFoam
+    kill $_MON_GAS 2>/dev/null
+    if [ -s log.mem_gas.tmp ]; then
+        peak=$(sort -n log.mem_gas.tmp | tail -1)
+        echo "Peak RSS (all rhoReactingBuoyantFoam processes): ${peak} kB" > log.mem_gas
+    fi
+    rm -f log.mem_gas.tmp
+
+    runApplication reconstructParMesh -constant
+    runApplication reconstructPar
+    runApplication foamToVTK -no-internal -latestTime -fields '()'
+    runApplication postProcess -func cuttingPlane -latestTime
+""")
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -423,6 +505,57 @@ def build_case(
     return case_dir
 
 
+_TIME_DIR_RE = re.compile(r"^[0-9]+(\.[0-9]+)?$")
+
+
+def copy_case_for_restart(parent_dir: Path, child_dir: Path) -> Path:
+    """Copy a parent case directory into a fresh child directory for restart.
+
+    The child reuses the parent's mesh + converged solution, but those live in
+    the decomposed ``processor*`` directories (seeded separately — remotely on
+    the cluster, locally for the local runner). We copy only the lightweight
+    case definition (system/, constant dicts, 0.orig/, STL, case_params.json,
+    Allrun) and the solver logs (so the phase-aware convergence display keeps
+    working). Everything a restart does NOT need is skipped:
+
+      - The parent's postProcessing: the child produces its OWN force
+        coefficients / cutting planes / streamlines. Inheriting the parent's
+        would pollute the child's plots (e.g. a steady parent's iteration-axis
+        forceCoeffs showing up on an unsteady child).
+      - Decomposed / reconstructed field data: processor*, VTK, polyMesh,
+        root-level numeric time dirs (regenerated by the child's own run).
+      - Meshing-only artifacts (a restart never re-meshes): the large
+        extendedFeatureEdgeMesh (hundreds of MB), *.eMesh, and *.obj CAD.
+
+    This keeps the local copy + upload small; the mesh comes from the remote
+    processor* seed. The numeric-time-dir skip is restricted to the case ROOT.
+    """
+    parent_root = parent_dir.resolve()
+
+    def _ignore(dir_path: str, names: list[str]) -> list[str]:
+        at_root = Path(dir_path).resolve() == parent_root
+        skip = []
+        for name in names:
+            if name in ("polyMesh", "VTK", "extendedFeatureEdgeMesh"):
+                skip.append(name)
+            elif at_root and name in ("postProcessing", "postProcessing_aero"):
+                skip.append(name)
+            elif name.endswith((".eMesh", ".obj")):
+                skip.append(name)
+            elif name.startswith("processor") and name[len("processor"):].isdigit():
+                skip.append(name)
+            elif at_root and name != "0.orig" and _TIME_DIR_RE.match(name) \
+                    and (Path(dir_path) / name).is_dir():
+                # root-level reconstructed time dir (e.g. "0", "1000", "0.7")
+                skip.append(name)
+        return skip
+
+    if child_dir.exists():
+        shutil.rmtree(child_dir)
+    shutil.copytree(parent_dir, child_dir, ignore=_ignore, symlinks=True)
+    return child_dir
+
+
 def build_restart_case(case_dir: Path, new_end_time: int) -> Path:
     """Update endTime/startFrom in controlDict and replace Allrun with solver-only restart script."""
     ctrl_path = case_dir / "system" / "controlDict"
@@ -512,6 +645,8 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     ctrl = (GAS_FILES / "controlDict").read_text()
     ctrl = _set_value(ctrl, "endTime", str(gas_end))
     ctrl = _set_value(ctrl, "deltaT", str(gas_dt))
+    # Courant-adaptive stepping: cap dt at the requested value, shrink on demand
+    ctrl = _set_value(ctrl, "maxDeltaT", str(gas_dt))
     ctrl = _set_value(ctrl, "writeInterval", str(min(1000, n_steps)))
     (case_dir / "system" / "controlDict.gas").write_text(ctrl)
     for fname in ("fvSchemes", "fvSolution"):
@@ -520,6 +655,23 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
                           else "turbulenceProperties")
     tp = _set_value(tp_src.read_text(), "LESModel", gas_model)
     (case_dir / "constant" / "turbulenceProperties.gas").write_text(tp)
+
+    # Compressible force coefficients (activated via controlDict.gas' #include
+    # "forceCoeffs"). rho=rho integrates real forces; rhoInf = far-field air
+    # density normalises Cd/Cl to match the incompressible aero LES convention,
+    # so the two runs are directly comparable. Overwrites the copied aero one.
+    fc = (GAS_FILES / "forceCoeffs").read_text()
+    velocity = params.get("velocity_mps", 20.0)
+    aref = params.get("aref", 0.75)
+    lref = params.get("lref", 1.42)
+    cofr = params.get("cofr", [0.72, 0.0, 0.0])
+    rho_air = round(1.0e5 * 0.02896 / (8.314 * 300.0), 4)  # p*M/(R*T) at gas init state
+    fc = _set_value(fc, "magUInf", str(velocity))
+    fc = _set_value(fc, "Aref", str(aref))
+    fc = _set_value(fc, "lRef", str(lref))
+    fc = _set_value(fc, "CofR", f"({cofr[0]} {cofr[1]} {cofr[2]})")
+    fc = _set_value(fc, "rhoInf", str(rho_air))
+    (case_dir / "system" / "forceCoeffs").write_text(fc)
 
     # --- new constant files (only read by the gas solver) ---
     for fname in ("thermophysicalProperties", "reactions", "chemistryProperties",
@@ -534,10 +686,23 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     rotated_stl = case_dir / "constant" / "triSurface" / "motorBike.stl"
     source = params.get("source_position") or _auto_source_position(rotated_stl)
     rate = float(params.get("source_rate", 1.0))
+    start = float(params.get("gas_source_start_time", 0.0) or 0.0)
+    stop = float(params.get("gas_source_stop_time", 0.0) or 0.0)
+    # Emission window end: an explicit stop within (start, gas_end], else run to gas_end
+    emit_end = stop if (start < stop <= gas_end) else gas_end
     fv = (GAS_FILES / "fvOptions").read_text()
     fv = fv.replace("(0.0 0.0 1.0)", f"({source[0]} {source[1]} {source[2]})")
     fv = fv.replace("rho         (1.0 0);", f"rho         ({rate} 0);")
     fv = fv.replace("GAS         (1.0 0);", f"GAS         ({rate} 0);")
+    # Timed emission: gate the source with timeStart/duration (cellSetOption
+    # base) so the LES develops turbulence gas-free until `start`, emits, then
+    # stops at `stop` (emit_end). Only inject when a non-trivial window is set.
+    if start > 0 or emit_end < gas_end:
+        duration = round(max(gas_dt, emit_end - start), 9)
+        fv = fv.replace(
+            "    active          yes;\n",
+            f"    active          yes;\n    timeStart       {start};\n    duration        {duration};\n",
+        )
     (case_dir / "constant" / "fvOptions").write_text(fv)
 
     # --- uniform initial fields overlaid onto each processor's time 0 ---
@@ -572,6 +737,8 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
         "gas_density_ratio": ratio,
         "source_position": source,
         "source_rate": rate,
+        "gas_source_start_time": start,
+        "gas_source_stop_time": stop,
         "les_end_time": gas_end,
         "les_delta_t": gas_dt,
     })
@@ -580,6 +747,53 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     allrun = case_dir / "Allrun"
     allrun.write_text(_ALLRUN_GAS_RESTART)
     allrun.chmod(0o755)
+
+    return case_dir
+
+
+def build_warmup_gas_case(case_dir: Path, params: dict) -> Path:
+    """Steady -> short aero-LES warm-up -> gas dispersion, all in one case.
+
+    Seeding the compressible gas solver straight from a steady RANS field makes
+    its adaptive time step collapse. Instead run the incompressible pisoFoam LES
+    for `les_warmup_time` seconds first (stable from a RANS seed) to develop
+    turbulence, then hand that field to the gas stage. Reuses the entire gas
+    build (build_gas_les_restart_case) and adds the warm-up LES configs + a
+    combined Allrun that runs pisoFoam then rhoReactingBuoyantFoam.
+    """
+    warmup = float(params.get("les_warmup_time", 0.05))
+    les_model = params.get("gas_model") or params.get("les_model", "kOmegaSSTDDES")
+
+    # 1. Full gas-stage setup (controlDict.gas, gas0, forceCoeffs, fvOptions,
+    #    thermo, cuttingPlane fields, case_params merge, ... and the gas Allrun)
+    build_gas_les_restart_case(case_dir, params)
+
+    # 2. Warm-up LES configs. controlDict.les must have EMPTY functions — the
+    #    shared system/cuttingPlane samples (p U T GAS) for the gas stage, which
+    #    incompressible pisoFoam cannot provide.
+    les_dt = float(params.get("les_delta_t", 1e-4))
+    _write_les_control_dict(case_dir, {**params, "les_end_time": warmup,
+                                       "les_delta_t": les_dt}, src_dir=LES_FILES_KOSST)
+    ctrl_les = case_dir / "system" / "controlDict.les"
+    txt = ctrl_les.read_text()
+    txt = re.sub(r'functions\s*\{[^}]*\}', "functions\n{\n}", txt, count=1, flags=re.DOTALL)
+    ctrl_les.write_text(txt)
+    for fname in ("fvSchemes", "fvSolution"):
+        shutil.copy2(LES_FILES_KOSST / fname, case_dir / "system" / f"{fname}.les")
+    tp_src = LES_FILES_KOSST / ("turbulenceProperties.IDDES" if les_model == "kOmegaSSTIDDES"
+                                else "turbulenceProperties")
+    (case_dir / "constant" / "turbulenceProperties.les").write_text(
+        _set_value(tp_src.read_text(), "LESModel", les_model))
+
+    # 3. Combined Allrun (overwrites the gas-only one) + record warm-up time
+    allrun = case_dir / "Allrun"
+    allrun.write_text(_ALLRUN_WARMUP_GAS)
+    allrun.chmod(0o755)
+
+    params_file = case_dir / "case_params.json"
+    merged = json.loads(params_file.read_text()) if params_file.exists() else {}
+    merged["les_warmup_time"] = warmup
+    params_file.write_text(json.dumps(merged, indent=2))
 
     return case_dir
 

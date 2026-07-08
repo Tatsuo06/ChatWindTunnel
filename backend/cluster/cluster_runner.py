@@ -122,7 +122,8 @@ class ClusterRunner(JobRunner):
         base = settings.CLUSTER_WORK_DIR.format(user=settings.CLUSTER_USER)
         return f"{base}/{case_dir.name}"
 
-    def submit(self, case_dir: Path, n_processors: int, job_name: str) -> str:
+    def submit(self, case_dir: Path, n_processors: int, job_name: str,
+               seed_processors_from: Path | None = None) -> str:
         remote_case_dir = self._remote_dir(case_dir)
         log_path = f"{remote_case_dir}/log.job"
         pbs_path = f"{remote_case_dir}/run.pbs"
@@ -138,8 +139,28 @@ class ClusterRunner(JobRunner):
         # 1. Create remote directory
         _ssh(f"mkdir -p {remote_case_dir}")
 
-        # 2. Upload case files
+        # 2. Upload case files (rsync excludes processor* — see _rsync_up)
         _rsync_up(case_dir, remote_case_dir)
+
+        # 2b. Seed the decomposed solution from the parent case, remote→remote.
+        # Use hard links (cp -al): the processor* dirs are large (GBs) and live
+        # on the same NFS export, so hard-linking is near-instant instead of
+        # duplicating the data. It is safe because the restart Allruns never
+        # modify a seeded file in place — they `cp -r` the latest time dir into
+        # a fresh "0", then `rm` (unlink) the other seeded time dirs, and only
+        # read the (hard-linked) mesh. Fall back to a real copy if the platform
+        # rejects cross-directory hard links.
+        if seed_processors_from is not None:
+            parent_remote = self._remote_dir(seed_processors_from)
+            out, err = _ssh(
+                f"cp -al {parent_remote}/processor* {remote_case_dir}/ 2>/dev/null "
+                f"|| cp -a {parent_remote}/processor* {remote_case_dir}/; "
+                f"[ -d {remote_case_dir}/processor0 ] && echo OK"
+            )
+            if "OK" not in out:
+                raise RuntimeError(
+                    f"failed to seed processor dirs from {parent_remote}: {err or out}"
+                )
 
         # 3. Write PBS script and submit
         # Use printf to avoid heredoc quoting issues
@@ -214,3 +235,33 @@ class ClusterRunner(JobRunner):
         queued = sum(1 for line in out.splitlines() if re.search(r"\s+Q\s+", line))
         running = sum(1 for line in out.splitlines() if re.search(r"\s+R\s+", line))
         return {"queued": queued, "running": running}
+
+    def cluster_load(self) -> dict[str, int]:
+        """Cluster-wide load in a single ssh round trip.
+
+        Returns:
+          queued / running   : this user's Q / R job counts (qstat -u)
+          running_all         : R jobs across ALL users (not just ChatWindTunnel)
+          free_nodes / total_nodes : from pbsnodes -l all
+        """
+        out, _ = _ssh(
+            "qstat 2>/dev/null; echo '===MINE==='; "
+            f"qstat -u {settings.CLUSTER_USER} 2>/dev/null; echo '===NODES==='; "
+            "pbsnodes -l all 2>/dev/null"
+        )
+        all_part, rest = (out.split("===MINE===", 1) + [""])[:2]
+        mine_part, nodes_part = (rest.split("===NODES===", 1) + [""])[:2]
+
+        def _count(text: str, state: str) -> int:
+            return sum(1 for ln in text.splitlines() if re.search(rf"\s+{state}\s+", ln))
+
+        node_lines = [ln for ln in nodes_part.splitlines()
+                      if ln.strip() and "." in ln.split()[0]]
+        free_nodes = sum(1 for ln in node_lines if re.search(r"\bfree\b", ln))
+        return {
+            "queued": _count(mine_part, "Q"),
+            "running": _count(mine_part, "R"),
+            "running_all": _count(all_part, "R"),
+            "free_nodes": free_nodes,
+            "total_nodes": len(node_lines),
+        }

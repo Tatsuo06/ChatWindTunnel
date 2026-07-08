@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
     for ddl in (
         "ALTER TABLE geometries ADD COLUMN description TEXT DEFAULT ''",
         "ALTER TABLE simulations ADD COLUMN description TEXT DEFAULT ''",
+        "ALTER TABLE simulations ADD COLUMN parent_id INTEGER",
     ):
         try:
             async with engine.begin() as conn:

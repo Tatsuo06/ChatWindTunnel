@@ -31,12 +31,25 @@ def test_phase_logs_steady(tmp_path):
 
 
 def test_phase_logs_unsteady(tmp_path):
+    # Aero LES: steady seed (simpleFoam) + LES (pisoFoam) -> phases 1 and 2
+    (tmp_path / "log.simpleFoam").write_text("Time = 1\n")
+    (tmp_path / "log.pisoFoam").write_text("Time = 0.001\n")
     entries = phase_logs(tmp_path, SimulatorType.unsteady)
     assert [e["phase"] for e in entries] == [1, 2]
     assert entries[0]["log"] == tmp_path / "log.simpleFoam"
     assert entries[0]["unit"] == "iteration"
     assert entries[1]["log"] == tmp_path / "log.pisoFoam"
     assert entries[1]["unit"] == "s"
+
+
+def test_phase_logs_unsteady_gas_from_steady(tmp_path):
+    # Steady -> gas dispersion directly: no pisoFoam (LES) log, so Phase 2 is
+    # skipped; only Phase 1 (steady seed) and Phase 3 (gas LES) are present.
+    (tmp_path / "log.simpleFoam").write_text("Time = 1\n")
+    (tmp_path / "log.rhoReactingBuoyantFoam").write_text("Time = 0.001\n")
+    entries = phase_logs(tmp_path, SimulatorType.unsteady)
+    assert [e["phase"] for e in entries] == [1, 3]
+    assert entries[1]["log"] == tmp_path / "log.rhoReactingBuoyantFoam"
 
 
 def test_parse_force_coefficients_steady_like_single_phase(tmp_path):

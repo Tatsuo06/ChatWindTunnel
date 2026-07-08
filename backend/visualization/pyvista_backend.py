@@ -71,7 +71,7 @@ class PyVistaBackend(VisualizationBackend):
         pl.close()
         return _array_to_png(img)
 
-    def plot_residuals(self, log_path: Path) -> bytes:
+    def plot_residuals(self, log_path: Path, x_max: float | None = None) -> bytes:
         df = parse_residuals(log_path)
         if df.empty:
             return _empty_plot("No residual data found")
@@ -90,12 +90,39 @@ class PyVistaBackend(VisualizationBackend):
             template="plotly_white",
             height=400,
         )
+        # Fix the x-axis to the planned endTime so progress toward the target is
+        # visible (the trace stops partway while the run is still in progress).
+        if x_max and x_max > 0:
+            left = min(0.0, float(df["Time"].min()))
+            fig.update_xaxes(range=[left, x_max])
         return pio.to_image(fig, format="png")
 
-    def plot_force_coefficients(self, postproc_dir: Path) -> bytes:
+    def plot_force_coefficients(self, postproc_dir: Path, only_last_phase: bool = False,
+                                phase_end: dict | None = None,
+                                single_x_max: float | None = None,
+                                single_x_title: str | None = None,
+                                clamp_time: float | None = None) -> bytes:
         df = parse_force_coefficients(postproc_dir)
         if df.empty:
             return _empty_plot("No force coefficient data found")
+
+        # Unsteady child: its own force data is in seconds (Time <= end time). Any
+        # rows beyond that are stale inherited parent iterations — drop them so a
+        # steady parent's iteration-axis history can't pollute the child's plot.
+        if clamp_time and clamp_time > 0:
+            df = df[df["Time"] <= clamp_time * 1.01]
+            if df.empty:
+                return _empty_plot("No force coefficient data found")
+
+        # Restart children inherit the parent's forceCoeffs history (earlier
+        # phases); show only the child's own stage.
+        if only_last_phase and "Phase" in df.columns and df["Phase"].nunique() > 1:
+            df = df[df["Phase"] == df["Phase"].max()]
+
+        def _phase_range(pdf, phase):
+            # x-axis upper bound = planned endTime for this phase (progress view)
+            xm = float((phase_end or {}).get(phase, 0) or 0)
+            return [min(0.0, float(pdf["Time"].min())), xm] if xm > 0 else None
 
         n_phases = df["Phase"].nunique() if "Phase" in df.columns else 1
         if n_phases > 1:
@@ -117,7 +144,9 @@ class PyVistaBackend(VisualizationBackend):
                             row=i, col=1,
                         )
                 xaxis_title = "Iteration" if phase == 1 else "Time [s]"
-                fig.update_xaxes(title_text=xaxis_title, row=i, col=1)
+                _rng = _phase_range(phase_df, phase)
+                fig.update_xaxes(title_text=xaxis_title, row=i, col=1,
+                                 **({"range": _rng} if _rng else {}))
                 fig.update_yaxes(title_text="Coefficient", row=i, col=1)
             fig.update_layout(
                 title="Force / Moment Coefficients",
@@ -133,11 +162,15 @@ class PyVistaBackend(VisualizationBackend):
 
         fig.update_layout(
             title="Force / Moment Coefficients",
-            xaxis_title="Iteration / Time",
+            xaxis_title=single_x_title or "Iteration / Time",
             yaxis_title="Coefficient",
             template="plotly_white",
             height=400,
         )
+        # x-axis upper bound = planned endTime (caller knows the unit: iterations
+        # for steady, seconds for an unsteady child's own stage)
+        if single_x_max and single_x_max > 0:
+            fig.update_xaxes(range=[min(0.0, float(df["Time"].min())), single_x_max])
         return pio.to_image(fig, format="png")
 
     def plot_cutting_plane(self, vtk_path: Path, field: str = "p",

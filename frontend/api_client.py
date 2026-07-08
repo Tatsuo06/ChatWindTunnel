@@ -209,16 +209,17 @@ def cancel_job(sim_id: int) -> bool:
     return _post(f"/simulations/{sim_id}/job/cancel").status_code == 204
 
 
-def restart_job(sim_id: int, new_end_time: int) -> dict | None:
+def restart_job(sim_id: int, name: str, new_end_time: int) -> dict | None:
     r = _post(f"/simulations/{sim_id}/job/restart",
-              json={"mode": "steady", "new_end_time": new_end_time})
+              json={"mode": "steady", "name": name, "new_end_time": new_end_time})
     return r.json() if r.ok else None
 
 
-def restart_job_les(sim_id: int, les_end_time: float, les_delta_t: float,
+def restart_job_les(sim_id: int, name: str, les_end_time: float, les_delta_t: float,
                     les_anim_interval: int, les_model: str) -> dict | None:
     r = _post(f"/simulations/{sim_id}/job/restart", json={
         "mode": "unsteady",
+        "name": name,
         "les_end_time": les_end_time,
         "les_delta_t": les_delta_t,
         "les_anim_interval": les_anim_interval,
@@ -227,17 +228,26 @@ def restart_job_les(sim_id: int, les_end_time: float, les_delta_t: float,
     return r.json() if r.ok else None
 
 
-def restart_job_gas(sim_id: int, gas_end_time: float, gas_delta_t: float,
+def restart_job_gas(sim_id: int, name: str, gas_end_time: float, gas_delta_t: float,
                     gas_model: str, gas_density_ratio: float,
-                    source_position: list | None, source_rate: float) -> dict | None:
+                    source_position: list | None, source_rate: float,
+                    gas_source_start_time: float = 0.0,
+                    gas_source_stop_time: float = 0.0,
+                    les_anim_interval: int | None = None,
+                    les_warmup_time: float = 0.0) -> dict | None:
     r = _post(f"/simulations/{sim_id}/job/restart", json={
         "mode": "gas",
+        "name": name,
         "gas_end_time": gas_end_time,
         "gas_delta_t": gas_delta_t,
         "gas_model": gas_model,
         "gas_density_ratio": gas_density_ratio,
         "source_position": source_position,
         "source_rate": source_rate,
+        "gas_source_start_time": gas_source_start_time,
+        "gas_source_stop_time": gas_source_stop_time,
+        "les_anim_interval": les_anim_interval,
+        "les_warmup_time": les_warmup_time,
     })
     return r.json() if r.ok else None
 

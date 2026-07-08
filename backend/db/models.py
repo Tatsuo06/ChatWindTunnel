@@ -5,7 +5,7 @@ from sqlalchemy import (
     Column, DateTime, Enum, Float, ForeignKey,
     Integer, JSON, String, Text,
 )
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, backref, relationship
 
 
 def utcnow():
@@ -99,12 +99,22 @@ class Simulation(Base):
     # All OpenFOAM parameters as JSON
     parameters = Column(JSON, default=dict)
 
+    # Restart children (LES / gas-dispersion / steady-extend) reference their
+    # parent case here. Each child is an independent case in its own directory.
+    parent_id = Column(Integer, ForeignKey("simulations.id"), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=utcnow)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
     geometry = relationship("Geometry", back_populates="simulations")
     messages = relationship("ChatMessage", back_populates="simulation", cascade="all, delete-orphan")
+    # No delete cascade: parent deletion is blocked in the API while children
+    # exist (children are independent cases and deleted individually).
+    children = relationship(
+        "Simulation",
+        backref=backref("parent", remote_side=[id]),
+    )
 
 
 class ChatMessage(Base):
