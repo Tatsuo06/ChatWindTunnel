@@ -53,6 +53,27 @@ if not project_id:
 
 st.title(f"🔷 {t('geometry_title')} — {st.session_state.get('project_name', '')}")
 
+
+@st.dialog(t("delete_confirm_geo_title"))
+def _confirm_delete_geo(gid: int, name: str):
+    st.warning(t("delete_confirm_geo_msg", name))
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(t("delete_confirm_yes"), type="primary", width="stretch",
+                     key=f"cdg_yes_{gid}"):
+            if api.delete_geometry(gid):
+                if st.session_state.get("geo_id") == gid:
+                    st.session_state.pop("geo_id", None)
+                    st.session_state.pop("geo_name", None)
+                    st.session_state.pop("sim_id", None)
+                st.rerun()
+            else:
+                st.error(t("delete_failed"))
+    with c2:
+        if st.button(t("cancel"), width="stretch", key=f"cdg_no_{gid}"):
+            st.rerun()
+
+
 with st.expander(t("add_geometry"), expanded=False):
     with st.form("new_geo_form"):
         geo_name = st.text_input(t("geo_name_hint"))
@@ -153,12 +174,7 @@ else:
                     st.rerun()
             with cols[4]:
                 if st.button("🗑", key=f"del_{geo['id']}", help=t("delete_geo")):
-                    if api.delete_geometry(geo["id"]):
-                        if st.session_state.get("geo_id") == geo["id"]:
-                            st.session_state.pop("geo_id", None)
-                            st.session_state.pop("geo_name", None)
-                            st.session_state.pop("sim_id", None)
-                        st.rerun()
+                    _confirm_delete_geo(geo["id"], geo["name"])
         if not geo.get("stl_file_path"):
             with st.container():
                 up = st.file_uploader(

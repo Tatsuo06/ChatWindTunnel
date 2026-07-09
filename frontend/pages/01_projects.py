@@ -10,6 +10,27 @@ if "token" not in st.session_state:
 
 st.title(f"📁 {t('projects_title')}")
 
+
+@st.dialog(t("delete_confirm_proj_title"))
+def _confirm_delete_project(pid: int, name: str):
+    st.warning(t("delete_confirm_proj_msg", name))
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(t("delete_confirm_yes"), type="primary", width="stretch",
+                     key=f"cdp_yes_{pid}"):
+            if api.delete_project(pid):
+                if st.session_state.get("project_id") == pid:
+                    st.session_state.pop("project_id", None)
+                    st.session_state.pop("project_name", None)
+                    st.session_state.pop("sim_id", None)
+                st.rerun()
+            else:
+                st.error(t("delete_failed"))
+    with c2:
+        if st.button(t("cancel"), width="stretch", key=f"cdp_no_{pid}"):
+            st.rerun()
+
+
 with st.expander(t("new_project"), expanded=False):
     with st.form("create_project"):
         name = st.text_input(t("project_name"))
@@ -67,10 +88,5 @@ else:
                     st.rerun()
             with col4:
                 if st.button("🗑", key=f"del_{proj['id']}", help=t("delete")):
-                    if api.delete_project(proj["id"]):
-                        if st.session_state.get("project_id") == proj["id"]:
-                            st.session_state.pop("project_id", None)
-                            st.session_state.pop("project_name", None)
-                            st.session_state.pop("sim_id", None)
-                        st.rerun()
+                    _confirm_delete_project(proj["id"], proj["name"])
         st.divider()

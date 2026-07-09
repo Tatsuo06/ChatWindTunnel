@@ -185,7 +185,7 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
         with gs1:
             gas_start = st.number_input(
                 t("gas_source_start_time_lbl"),
-                value=float(params.get("gas_source_start_time", 0.0)),
+                value=float(params.get("gas_source_start_time", 0.1)),
                 min_value=0.0, step=0.05, format="%.4f", key=f"gr_start_{sim_id}",
                 help=t("gas_source_start_time_help"),
             )
@@ -538,6 +538,26 @@ if not geo_id:
 st.title(f"🌬️ {t('cases_title')} — {st.session_state.get('geo_name', '')}")
 
 
+# Defined in the page body (re-runs each render) so the dialog title follows the
+# current language. Opening it requires a confirm click before a case is deleted.
+@st.dialog(t("delete_confirm_title"))
+def _confirm_delete_case(sid: int, name: str):
+    st.warning(t("delete_confirm_msg", name))
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(t("delete_confirm_yes"), type="primary", width="stretch",
+                     key=f"cd_yes_{sid}"):
+            if api.delete_simulation(sid):
+                if st.session_state.get("sim_id") == sid:
+                    st.session_state.pop("sim_id", None)
+                st.rerun()
+            else:
+                st.error(t("delete_case_blocked"))
+    with c2:
+        if st.button(t("cancel"), width="stretch", key=f"cd_no_{sid}"):
+            st.rerun()
+
+
 def _llm_model_name() -> str:
     s = api.get_llm_settings()
     return s["model"] if s else "?"
@@ -756,12 +776,7 @@ with left:
                     st.rerun()
             with del_col:
                 if st.button("🗑", key=f"del_{s['id']}", help=t("delete_case")):
-                    if api.delete_simulation(s["id"]):
-                        if st.session_state.get("sim_id") == s["id"]:
-                            st.session_state.pop("sim_id", None)
-                        st.rerun()
-                    else:
-                        st.error(t("delete_case_blocked"))
+                    _confirm_delete_case(s["id"], s["name"])
 
     if not sims:
         st.info(t("no_cases"))
@@ -814,9 +829,7 @@ with right:
         with hcol3:
             if sim.get("status") not in ("MESHING", "RUNNING"):
                 if st.button(t("delete_btn"), key="del_current_sim"):
-                    if api.delete_simulation(sim_id):
-                        st.session_state.pop("sim_id", None)
-                        st.rerun()
+                    _confirm_delete_case(sim_id, sim.get("name", f"#{sim_id}"))
 
     tab_setup, tab_run, tab_mesh, tab_conv, tab_flow = st.tabs([
         t("tab_setup"), t("tab_run"),
@@ -939,9 +952,17 @@ with right:
         else:
             _runner_type = "cluster"
 
+        # A restart child is built by the parent's restart controls; a plain
+        # submit here would rebuild it from the template and destroy that setup.
+        _is_child = sim.get("parent_id") is not None
+        if _is_child:
+            st.caption(t("child_no_submit_note"))
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            disabled = current_status in ("MESHING", "RUNNING") or (geo and not geo.get("stl_file_path"))
+            disabled = (current_status in ("MESHING", "RUNNING")
+                        or (geo and not geo.get("stl_file_path"))
+                        or _is_child)
             if st.button(t("submit_job"), disabled=disabled, width="stretch"):
                 with st.spinner(t("submitting")):
                     result = api.submit_job(sim_id, runner_type=_runner_type)

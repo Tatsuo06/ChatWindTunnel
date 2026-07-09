@@ -3,7 +3,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from frontend.api_client import change_password, get_me, get_status_summary, login
+from frontend.api_client import change_password, get_me, get_simulation, get_status_summary, login
 from frontend.i18n import t
 
 _STATIC = Path(__file__).parent / "static"
@@ -254,11 +254,16 @@ def main():
         st.divider()
         if st.session_state.get("project_name"):
             st.caption(t("current_work"))
-            st.markdown(f"📁 {st.session_state['project_name']}")
+            _pid = st.session_state.get("project_id")
+            st.markdown(f"📁 {f'#{_pid} ' if _pid else ''}{st.session_state['project_name']}")
         if st.session_state.get("geo_name"):
-            st.markdown(f"🔷 {st.session_state['geo_name']}")
+            _gid = st.session_state.get("geo_id")
+            st.markdown(f"🔷 {f'#{_gid} ' if _gid else ''}{st.session_state['geo_name']}")
         if st.session_state.get("sim_id"):
-            st.markdown(f"🌬️ {t('case_hash')}{st.session_state['sim_id']}")
+            _sid = st.session_state["sim_id"]
+            _sim = get_simulation(_sid)
+            _sname = _sim.get("name", "") if _sim else ""
+            st.markdown(f"🌬️ #{_sid} {_sname}".rstrip())
         st.divider()
 
         summary = get_status_summary()

@@ -49,6 +49,16 @@ async def submit_job(sim_id: int, body: SubmitRequest, current_user: CurrentUser
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already running")
     if not sim.geometry.stl_file_path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No STL uploaded")
+    # A restart child's case dir is built by restart_job (seeded from the parent
+    # solution with LES/gas configs). build_case below would rebuild it from the
+    # template and silently destroy that setup, so a plain submit is forbidden —
+    # recreate the child from the parent's restart controls instead.
+    if sim.parent_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This is a restart child case and cannot be submitted directly "
+                   "(it would be rebuilt from the template and lose its restart "
+                   "setup). Recreate it from the parent case's restart controls.")
 
     if body.runner_type == "local":
         if not settings.ALLOW_LOCAL_RUNNER:
