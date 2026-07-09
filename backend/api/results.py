@@ -57,6 +57,50 @@ def _maybe_sync_live(sim, force: bool = False) -> None:
         marker.touch()
 
 
+def _sync_live_frames(sim, kind: str = "plane", force: bool = False) -> bool:
+    """Pull the cuttingPlane / streamLines frame VTKs from the cluster so an
+    animation / cutting plane can be rendered.
+
+    Returns True when the caller should (re)render from scratch:
+      * a live (running/meshing) job — frames keep growing;
+      * the first (or forced) sync of a finished cluster job — the finish sync
+        only brings the latest-time frame down, so the full animation set has to
+        be pulled on demand.
+    No-op / False for the local runner (frames already on disk).
+    """
+    if not sim.case_dir:
+        return False
+    from backend.cluster import get_runner
+    from backend.cluster.cluster_runner import ClusterRunner
+    runner = get_runner()
+    if not isinstance(runner, ClusterRunner):
+        return False
+    import time
+    case_dir = Path(sim.case_dir)
+    live = sim.status in (SimulationStatus.meshing, SimulationStatus.running)
+    if live:
+        # Throttle: the still cutting-plane is re-fetched on every Flow-tab
+        # rerun, so cap the cluster rsync to once per 25 s per frame kind.
+        marker = case_dir / f".live_frames_{kind}"
+        if force or not (marker.exists() and time.time() - marker.stat().st_mtime < 25):
+            try:
+                runner.fetch_live_frames(case_dir, kind=kind)
+            finally:
+                marker.touch()
+        return True
+    if sim.status == SimulationStatus.done:
+        # One-shot: a finished job's frames are final. Sync once (marker guards
+        # against re-pulling on every request); a forced regenerate re-syncs.
+        marker = case_dir / f".frames_synced_{kind}"
+        if force or not marker.exists():
+            try:
+                runner.fetch_live_frames(case_dir, kind=kind)
+            finally:
+                marker.touch()
+            return True
+    return False
+
+
 @router.get("/geometry")
 async def geometry_preview(sim_id: int, current_user: CurrentUser, db: DB):
     import json as _json
@@ -295,6 +339,10 @@ async def cutting_plane(sim_id: int, field: str = "p", current_user: CurrentUser
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No case directory")
 
     case_dir = Path(sim.case_dir)
+    # Mid-run: pull the latest cuttingPlane frames from the cluster first.
+    import asyncio
+    await asyncio.get_event_loop().run_in_executor(
+        None, lambda: _sync_live_frames(sim, "plane"))
     vtk_files = sorted(
         (case_dir / "postProcessing" / "cuttingPlane").glob("**/yNormal.vtp"),
         key=lambda p: float(p.parent.name) if p.parent.name.replace(".", "").isdigit() else 0,
@@ -422,11 +470,18 @@ async def animation(sim_id: int, kind: str = "plane", field: str = "U",
     out_name = f"plane_{field}.mp4" if kind == "plane" else "streamlines.mp4"
     out_path = case_dir / "animations" / out_name
 
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    # Pull frames from the cluster on demand — for a live job (frames grow) or the
+    # first time a finished cluster job is animated (only its latest-time frame is
+    # synced at finish). Re-render whenever fresh frames were pulled.
+    if await loop.run_in_executor(None, lambda: _sync_live_frames(sim, kind, force=force)):
+        force = True
+
     if force or not out_path.exists():
         geo_bounds = _case_geo_bounds(case_dir)
         stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
-        import asyncio
-        loop = asyncio.get_event_loop()
         try:
             out_path = await loop.run_in_executor(
                 None,

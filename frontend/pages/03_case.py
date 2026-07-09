@@ -1157,9 +1157,13 @@ with right:
 
     # ── Visualization ────────────────────────────
     with tab_flow:
-        if not _is_done:
+        _flow_live = (current_status in ("MESHING", "RUNNING")
+                      and sim.get("solver_type") == "UNSTEADY")
+        if not _is_done and not _flow_live:
             st.info(t("sim_pending_msg"))
         else:
+            if _flow_live:
+                st.caption(t("flow_live_note"))
             st.subheader(t("cutting_plane"))
             field_opts = [t("field_p"), t("field_u"), t("field_mesh")]
             field_map = {t("field_p"): "p", t("field_u"): "U", t("field_mesh"): "mesh"}
