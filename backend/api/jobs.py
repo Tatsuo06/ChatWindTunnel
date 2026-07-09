@@ -240,7 +240,6 @@ class RestartRequest(BaseModel):
     source_rate: float | None = None
     gas_source_start_time: float | None = None
     gas_source_stop_time: float | None = None
-    les_warmup_time: float | None = None   # steady->gas: aero-LES warm-up before gas (0 = direct)
     gas_max_co: float | None = None        # gas stage adjustTimeStep maxCo (higher = faster/less stable)
 
 
@@ -256,7 +255,7 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
     """
     import shutil
     from backend.foam.case_builder import (
-        build_les_restart_case, build_gas_les_restart_case, build_warmup_gas_case,
+        build_les_restart_case, build_gas_les_restart_case,
         copy_case_for_restart, LES_RESTART_MODELS,
     )
 
@@ -363,18 +362,11 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
             new_params["source_rate"] = body.source_rate
         new_solver_type = SimulatorType.unsteady
 
-        # From a steady parent, an optional aero-LES warm-up develops turbulence
-        # before the compressible gas stage (the direct-from-RANS seed stalls).
-        warmup = body.les_warmup_time or 0.0
-        _use_warmup = (parent.solver_type == SimulatorType.steady and warmup > 0)
-        if _use_warmup:
-            new_params["les_warmup_time"] = warmup
-
+        # A steady parent seeds the gas stage directly; when developed turbulence
+        # is needed, run an aero LES child first and restart *that* as a gas
+        # grandchild (parent.solver_type == unsteady branch above).
         def _build(child_dir: Path):
-            if _use_warmup:
-                build_warmup_gas_case(child_dir, new_params)
-            else:
-                build_gas_les_restart_case(child_dir, new_params)
+            build_gas_les_restart_case(child_dir, new_params)
 
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be 'steady', 'unsteady' or 'gas'")

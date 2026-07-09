@@ -36,7 +36,7 @@ deltaT          1e-4;
 // requested ceiling once settled. (Do NOT name the edited keys in this comment.)
 adjustTimeStep  yes;
 
-maxCo           1.0;
+maxCo           1.5;
 
 maxDeltaT       1e-4;
 

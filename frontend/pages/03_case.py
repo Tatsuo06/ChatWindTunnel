@@ -207,7 +207,7 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
         with ga2:
             gas_maxco = st.number_input(
                 t("gas_max_co_lbl"),
-                value=float(params.get("gas_max_co", 1.0)),
+                value=float(params.get("gas_max_co", 1.5)),
                 min_value=0.1, step=0.5, format="%.1f", key=f"gr_maxco_{sim_id}",
                 help=t("gas_max_co_help"),
             )
@@ -250,14 +250,6 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
         st.warning(t("restart_les_kosst_only", turb))
         return
     st.caption(t("restart_gas_direct_note"))
-    warmup = st.number_input(
-        t("les_warmup_time_lbl"),
-        value=float(params.get("les_warmup_time", 0.05)),
-        min_value=0.0, step=0.01, format="%.4f", key=f"grs_warmup_{sim_id}",
-        help=t("les_warmup_time_help"),
-    )
-    if warmup > 0:
-        st.caption(t("les_warmup_note"))
     # Drop the steady parent's source_rate (relative units) so the kg/s rate
     # defaults to rate_default rather than the parent's value.
     gas_params = {k: v for k, v in params.items() if k != "source_rate"}
@@ -311,7 +303,7 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
     with gm3:
         gas_maxco = st.number_input(
             t("gas_max_co_lbl"),
-            value=float(params.get("gas_max_co", 1.0)),
+            value=float(params.get("gas_max_co", 1.5)),
             min_value=0.1, step=0.5, format="%.1f", key=f"grs_maxco_{sim_id}",
             help=t("gas_max_co_help"),
         )
@@ -333,7 +325,7 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
                     sim_id, child_name.strip(), gas_end, gas_dt, gas_model,
                     gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
                     gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
-                    les_anim_interval=int(gas_anim), les_warmup_time=float(warmup),
+                    les_anim_interval=int(gas_anim),
                     gas_max_co=float(gas_maxco),
                 )
             if result:
@@ -438,6 +430,78 @@ def _show_restart_expander(sim: dict, sim_id: int, allow_les: bool = False) -> N
                         st.rerun()
                     else:
                         st.error(t("restart_fail"))
+
+
+def _show_run_conditions(sim: dict) -> None:
+    """Compact read-only summary of what a case is running, shown in the Run tab
+    below the timing info. Setup tab is unchanged. A restart child (parent_id set)
+    shows its restart-specific settings; a root case shows its run conditions."""
+    params = sim.get("parameters", {}) or {}
+    solver = sim.get("solver_type", "STEADY")
+    is_gas = bool(params.get("gas_les"))
+
+    rows: list[tuple[str, str]] = []
+
+    def add(label: str, val) -> None:
+        if val is None or val == "":
+            return
+        if isinstance(val, bool):
+            return
+        if isinstance(val, (int, float)):
+            val = "%g" % val
+        rows.append((label, str(val)))
+
+    if not sim.get("parent_id"):
+        # Root case: show its run conditions (velocity, end iterations, attitude).
+        title = t("run_conditions")
+        header = title
+        add(t("wind_speed"), params.get("velocity_mps"))
+        add(t("end_iter_lbl"), params.get("end_time"))
+        yaw, pitch, roll = sim.get("yaw_deg"), sim.get("pitch_deg"), sim.get("roll_deg")
+        if any(float(a or 0) != 0 for a in (yaw, pitch, roll)):
+            add(t("yaw_angle"), yaw)
+            add(t("pitch_angle"), pitch)
+            add(t("roll_angle"), roll)
+        add(t("turb_intensity_lbl"), params.get("turbulence_intensity"))
+        with st.container(border=True):
+            st.markdown(f"**⚙️ {header}**")
+            if rows:
+                table = "| | |\n|---|---|\n" + "\n".join(
+                    f"| {k} | `{v}` |" for k, v in rows
+                )
+                st.markdown(table)
+        return
+
+    if is_gas:
+        mode = t("restart_mode_gas")
+        add(t("les_model_lbl"), params.get("gas_model") or params.get("les_model"))
+        add(t("gas_end_time_lbl"), params.get("gas_end_time"))
+        add(t("gas_delta_t_lbl"), params.get("gas_delta_t"))
+        add(t("gas_max_co_lbl"), params.get("gas_max_co"))
+        add(t("gas_density_ratio_lbl"), params.get("gas_density_ratio"))
+        add(t("gas_source_start_time_lbl"), params.get("gas_source_start_time"))
+        add(t("gas_source_stop_time_lbl"), params.get("gas_source_stop_time"))
+        add(t("source_rate"), params.get("source_rate"))
+    elif solver == "UNSTEADY":
+        mode = t("restart_mode_les")
+        add(t("les_model_lbl"), params.get("les_model"))
+        add(t("les_end_time_lbl"), params.get("les_end_time"))
+        add(t("les_delta_t_lbl"), params.get("les_delta_t"))
+        add(t("les_anim_interval_lbl"), params.get("les_anim_interval"))
+    else:
+        mode = t("restart_mode_steady")
+        add(t("steady_end_lbl"), params.get("end_time"))
+
+    with st.container(border=True):
+        st.markdown(
+            f"**🔁 {t('restart_summary')}** — {mode}  ·  "
+            f"{t('restart_parent')}: #{sim['parent_id']}"
+        )
+        if rows:
+            table = "| | |\n|---|---|\n" + "\n".join(
+                f"| {k} | `{v}` |" for k, v in rows
+            )
+            st.markdown(table)
 
 
 def _ordered_with_depth(sims: list[dict]) -> list[tuple[dict, int]]:
@@ -991,6 +1055,8 @@ with right:
                 _show_restart_expander(sim, sim_id, allow_les=True)
             elif sim.get("solver_type") == "UNSTEADY":
                 _show_gas_restart_expander(sim, sim_id)
+
+        _show_run_conditions(sim)
 
         _results_chat(sim_id, "chat_run")
 
