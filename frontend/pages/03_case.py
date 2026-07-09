@@ -145,9 +145,10 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "",
 
 def _gas_source_velocity_note(rate: float, radius: float, density_ratio: float) -> None:
     """Show the effective gas-injection velocity as a reference and warn when it
-    is high. The release fills a hemisphere of radius R (flat side on the wall);
-    the gas leaves through its curved surface 2*pi*R^2, so v = (mdot/rho_gas)/A.
-    A single-cell point source (radius 0) is unresolved — warn to set a radius."""
+    is high. Conservative estimate: the gas leaves the release region through an
+    area ~2*pi*R^2, so v = (mdot/rho_gas)/A (a full sphere in open flow would
+    exit through 4*pi*R^2, i.e. half this — so this over-estimates, which is safe
+    for the warning). A single-cell point source (radius 0) is unresolved."""
     import math
     rho_gas = max(float(density_ratio), 1e-6) * 1.161   # p*M/(RT), M = ratio * M_air
     if radius and radius > 0:

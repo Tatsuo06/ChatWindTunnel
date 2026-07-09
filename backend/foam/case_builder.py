@@ -277,9 +277,10 @@ _ALLRUN_GAS_RESTART = textwrap.dedent("""\
 """)
 
 
-# topoSetDict for distributing the gas source over a sphere of cells (only the
-# fluid side is selected, so it is a hemisphere in practice). Written by
-# build_gas_les_restart_case when source_radius > 0; the gas Allrun runs topoSet.
+# topoSetDict for distributing the gas source over a sphere of cells around the
+# release point (only fluid cells are selected — clipped where the sphere overlaps
+# the body; a hemisphere if the point sits on a surface, a full sphere if it is
+# clear of it). Written by build_gas_les_restart_case when source_radius > 0.
 _TOPOSET_SPHERE = textwrap.dedent("""\
     FoamFile
     {{
@@ -652,10 +653,11 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     fv = fv.replace("(0.0 0.0 1.0)", f"({source[0]} {source[1]} {source[2]})")
     fv = fv.replace("rho         (1.0 0);", f"rho         ({rate} 0);")
     fv = fv.replace("GAS         (1.0 0);", f"GAS         ({rate} 0);")
-    # Distribute the source over a sphere of fluid cells (a hemisphere in
-    # practice — the solid interior has no cells) instead of a single cell, so
-    # the injection is not a point singularity. topoSet builds the cellSet at run
-    # time (Allrun runs it when system/topoSetDict exists). radius 0 = point cell.
+    # Distribute the source over the fluid cells within `radius` of the release
+    # point (a sphere, clipped where it overlaps the body) instead of a single
+    # cell, so the injection is not a point singularity. topoSet builds the
+    # cellSet at run time (Allrun runs it when system/topoSetDict exists).
+    # radius 0 = single-cell point source.
     topo = case_dir / "system" / "topoSetDict"
     if topo.exists():
         topo.unlink()
