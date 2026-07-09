@@ -28,6 +28,7 @@ class SimulatorType(str, enum.Enum):
 
 class SimulationStatus(str, enum.Enum):
     pending = "PENDING"
+    scheduled = "SCHEDULED"   # restart child reserved via Torque afterok, held until parent finishes
     meshing = "MESHING"
     running = "RUNNING"
     done = "DONE"

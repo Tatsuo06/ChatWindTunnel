@@ -143,6 +143,24 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "",
     return {"gas_density_ratio": ratio, "source_rate": rate, "source_position": src_pos}
 
 
+def _gas_source_velocity_note(rate: float, radius: float, density_ratio: float) -> None:
+    """Show the effective gas-injection velocity as a reference and warn when it
+    is high. The release fills a hemisphere of radius R (flat side on the wall);
+    the gas leaves through its curved surface 2*pi*R^2, so v = (mdot/rho_gas)/A.
+    A single-cell point source (radius 0) is unresolved — warn to set a radius."""
+    import math
+    rho_gas = max(float(density_ratio), 1e-6) * 1.161   # p*M/(RT), M = ratio * M_air
+    if radius and radius > 0:
+        area = 2.0 * math.pi * radius ** 2
+        v = (float(rate) / rho_gas) / area
+        if v >= 50.0:
+            st.warning(t("gas_vel_warn", f"{v:.0f}"))
+        else:
+            st.caption(t("gas_vel_ref", f"{v:.1f}"))
+    else:
+        st.warning(t("gas_vel_point_warn"))
+
+
 def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
     """Restart a finished aero LES case as a gas-dispersion LES (rhoReactingBuoyantFoam)."""
     params = sim.get("parameters", {})
@@ -211,6 +229,13 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
                 min_value=0.1, step=0.5, format="%.1f", key=f"gr_maxco_{sim_id}",
                 help=t("gas_max_co_help"),
             )
+        gas_radius = st.number_input(
+            t("source_radius_lbl"),
+            value=float(params.get("source_radius", 0.05)),
+            min_value=0.0, step=0.01, format="%.3f", key=f"gr_radius_{sim_id}",
+            help=t("source_radius_help"),
+        )
+        _gas_source_velocity_note(gas["source_rate"], gas_radius, gas["gas_density_ratio"])
         child_name = st.text_input(
             t("child_case_name"),
             value=f"{sim.get('name', '')} — GAS",
@@ -230,6 +255,7 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
                         gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
                         gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
                         les_anim_interval=int(gas_anim), gas_max_co=float(gas_maxco),
+                        source_radius=float(gas_radius),
                     )
                 if result:
                     st.success(t("restart_ok", result.get("job_id")))
@@ -307,6 +333,13 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
             min_value=0.1, step=0.5, format="%.1f", key=f"grs_maxco_{sim_id}",
             help=t("gas_max_co_help"),
         )
+    gas_radius = st.number_input(
+        t("source_radius_lbl"),
+        value=float(params.get("source_radius", 0.05)),
+        min_value=0.0, step=0.01, format="%.3f", key=f"grs_radius_{sim_id}",
+        help=t("source_radius_help"),
+    )
+    _gas_source_velocity_note(gas["source_rate"], gas_radius, gas["gas_density_ratio"])
     child_name = st.text_input(
         t("child_case_name"),
         value=f"{sim.get('name', '')} — GAS",
@@ -327,6 +360,7 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
                     gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
                     les_anim_interval=int(gas_anim),
                     gas_max_co=float(gas_maxco),
+                    source_radius=float(gas_radius),
                 )
             if result:
                 st.success(t("restart_ok", result.get("job_id")))
@@ -482,6 +516,7 @@ def _show_run_conditions(sim: dict) -> None:
         add(t("gas_source_start_time_lbl"), params.get("gas_source_start_time"))
         add(t("gas_source_stop_time_lbl"), params.get("gas_source_stop_time"))
         add(t("source_rate"), params.get("source_rate"))
+        add(t("source_radius_lbl"), params.get("source_radius"))
     elif solver == "UNSTEADY":
         mode = t("restart_mode_les")
         add(t("les_model_lbl"), params.get("les_model"))
@@ -740,7 +775,7 @@ with left:
 
     sim_id = st.session_state.get("sim_id")
     for s, depth in _ordered_with_depth(sims):
-        status_icon = {"PENDING": "🔵", "MESHING": "🟡", "RUNNING": "🟡",
+        status_icon = {"PENDING": "🔵", "SCHEDULED": "⏳", "MESHING": "🟡", "RUNNING": "🟡",
                        "DONE": "🟢", "FAILED": "🔴"}.get(s["status"], "⚪")
         is_selected = s["id"] == sim_id
         if st.session_state.get(f"editing_sim_{s['id']}"):
@@ -929,7 +964,7 @@ with right:
 
     # ── Run & Results ──────────────────────────────────────────
     with tab_run:
-        status_color = {"PENDING": "🔵", "MESHING": "🟡", "RUNNING": "🟡",
+        status_color = {"PENDING": "🔵", "SCHEDULED": "⏳", "MESHING": "🟡", "RUNNING": "🟡",
                         "DONE": "🟢", "FAILED": "🔴"}
         st.markdown(f"{t('status_label')} {status_color.get(current_status, '')} {current_status}")
         st.caption(f"{t('turbulence_model_label')}: `{_turbulence_label(sim)}`")
@@ -983,7 +1018,7 @@ with right:
                 st.rerun()
         with col3:
             if st.button(t("stop"),
-                         disabled=current_status not in ("MESHING", "RUNNING"),
+                         disabled=current_status not in ("MESHING", "RUNNING", "SCHEDULED"),
                          width="stretch"):
                 api.cancel_job(sim_id)
                 st.rerun()
@@ -1012,6 +1047,16 @@ with right:
             _show_restart_expander(sim, sim_id)
         elif not _is_done:
             st.info(t("sim_pending_msg"))
+            # Reserve a child now: on the cluster, Torque holds it (afterok) until
+            # this job finishes, then runs it automatically. Local can't schedule.
+            if (current_status in ("MESHING", "RUNNING", "SCHEDULED")
+                    and _runner_info.get("cluster_available")):
+                st.divider()
+                st.caption(t("reserve_child_note"))
+                if sim.get("solver_type") == "STEADY":
+                    _show_restart_expander(sim, sim_id, allow_les=True)
+                elif sim.get("solver_type") == "UNSTEADY":
+                    _show_gas_restart_expander(sim, sim_id)
         else:
             st.success(t("sim_done"))
 

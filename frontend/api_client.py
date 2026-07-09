@@ -234,7 +234,8 @@ def restart_job_gas(sim_id: int, name: str, gas_end_time: float, gas_delta_t: fl
                     gas_source_start_time: float = 0.0,
                     gas_source_stop_time: float = 0.0,
                     les_anim_interval: int | None = None,
-                    gas_max_co: float | None = None) -> dict | None:
+                    gas_max_co: float | None = None,
+                    source_radius: float | None = None) -> dict | None:
     r = _post(f"/simulations/{sim_id}/job/restart", json={
         "mode": "gas",
         "name": name,
@@ -244,6 +245,7 @@ def restart_job_gas(sim_id: int, name: str, gas_end_time: float, gas_delta_t: fl
         "gas_density_ratio": gas_density_ratio,
         "source_position": source_position,
         "source_rate": source_rate,
+        "source_radius": source_radius,
         "gas_source_start_time": gas_source_start_time,
         "gas_source_stop_time": gas_source_stop_time,
         "les_anim_interval": les_anim_interval,

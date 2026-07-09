@@ -246,6 +246,11 @@ _ALLRUN_GAS_RESTART = textwrap.dedent("""\
     cp -f system/fvSolution.gas    system/fvSolution
     cp -f constant/turbulenceProperties.gas  constant/turbulenceProperties
 
+    # Build the gas-source cellSet (sphere of fluid cells) when a radius was set;
+    # the point-source case has no topoSetDict and skips this. Remove any inherited
+    # log.topoSet first (from the parent's meshing) or runParallel would skip it.
+    [ -f system/topoSetDict ] && { rm -f log.topoSet; runParallel topoSet; }
+
     rm -f log.rhoReactingBuoyantFoam log.reconstructParMesh log.reconstructPar log.foamToVTK log.postProcess
 
     (
@@ -269,6 +274,31 @@ _ALLRUN_GAS_RESTART = textwrap.dedent("""\
     # Surface mesh (Mesh tab) and y=0 cutting plane of the gas field (Visualization tab)
     runApplication foamToVTK -no-internal -latestTime -fields '()'
     runApplication postProcess -func cuttingPlane -latestTime
+""")
+
+
+# topoSetDict for distributing the gas source over a sphere of cells (only the
+# fluid side is selected, so it is a hemisphere in practice). Written by
+# build_gas_les_restart_case when source_radius > 0; the gas Allrun runs topoSet.
+_TOPOSET_SPHERE = textwrap.dedent("""\
+    FoamFile
+    {{
+        version     2.0;
+        format      ascii;
+        class       dictionary;
+        object      topoSetDict;
+    }}
+    actions
+    (
+        {{
+            name    gasSourceCells;
+            type    cellSet;
+            action  new;
+            source  sphereToCell;
+            origin  ({ox} {oy} {oz});
+            radius  {radius};
+        }}
+    );
 """)
 
 _ALLRUN_LES_RESTART = textwrap.dedent("""\
@@ -613,6 +643,7 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     rotated_stl = case_dir / "constant" / "triSurface" / "motorBike.stl"
     source = params.get("source_position") or _auto_source_position(rotated_stl)
     rate = float(params.get("source_rate", 1.0))
+    radius = float(params.get("source_radius", 0.0) or 0.0)
     start = float(params.get("gas_source_start_time", 0.0) or 0.0)
     stop = float(params.get("gas_source_stop_time", 0.0) or 0.0)
     # Emission window end: an explicit stop within (start, gas_end], else run to gas_end
@@ -621,6 +652,21 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     fv = fv.replace("(0.0 0.0 1.0)", f"({source[0]} {source[1]} {source[2]})")
     fv = fv.replace("rho         (1.0 0);", f"rho         ({rate} 0);")
     fv = fv.replace("GAS         (1.0 0);", f"GAS         ({rate} 0);")
+    # Distribute the source over a sphere of fluid cells (a hemisphere in
+    # practice — the solid interior has no cells) instead of a single cell, so
+    # the injection is not a point singularity. topoSet builds the cellSet at run
+    # time (Allrun runs it when system/topoSetDict exists). radius 0 = point cell.
+    topo = case_dir / "system" / "topoSetDict"
+    if topo.exists():
+        topo.unlink()
+    if radius > 0:
+        fv = fv.replace(
+            "    selectionMode   points;\n\n    points\n    (\n"
+            f"        ({source[0]} {source[1]} {source[2]})\n    );\n",
+            "    selectionMode   cellSet;\n    cellSet         gasSourceCells;\n",
+        )
+        topo.write_text(_TOPOSET_SPHERE.format(
+            ox=source[0], oy=source[1], oz=source[2], radius=radius))
     # Timed emission: gate the source with timeStart/duration (cellSetOption
     # base) so the LES develops turbulence gas-free until `start`, emits, then
     # stops at `stop` (emit_end). Only inject when a non-trivial window is set.
@@ -664,6 +710,7 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
         "gas_density_ratio": ratio,
         "source_position": source,
         "source_rate": rate,
+        "source_radius": radius,
         "gas_source_start_time": start,
         "gas_source_stop_time": stop,
         "gas_max_co": max_co,

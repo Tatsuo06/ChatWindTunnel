@@ -25,7 +25,7 @@ PBS_STATUS_MAP = {
     "R": "RUNNING",
     "C": "DONE",
     "E": "RUNNING",
-    "H": "PENDING",
+    "H": "SCHEDULED",   # held (e.g. waiting on an afterok dependency)
     "F": "DONE",
 }
 
@@ -36,9 +36,19 @@ JOB_SCRIPT_TEMPLATE = textwrap.dedent("""\
     #PBS -e {log_path}.err
     #PBS -N {job_name}
     cd {case_dir} || exit 1
-    source {foam_module}
+    {seed_preamble}source {foam_module}
     bash ./Allrun
 """)
+
+# Seed preamble for a reserved (scheduled) restart child: run inside the job so
+# it hard-links the parent's decomposed solution AFTER the parent has finished
+# (guaranteed by the qsub afterok dependency). Mirrors the immediate-path cp -al.
+_SEED_PREAMBLE_TEMPLATE = (
+    "# Seed decomposed solution from the finished parent case\n"
+    "cp -al {parent_remote}/processor* . 2>/dev/null "
+    "|| cp -a {parent_remote}/processor* .\n"
+    "[ -d processor0 ] || {{ echo 'ERROR: parent processor* not found' >&2; exit 1; }}\n"
+)
 
 
 def _ssh(cmd: str) -> tuple[str, str]:
@@ -123,10 +133,26 @@ class ClusterRunner(JobRunner):
         return f"{base}/{case_dir.name}"
 
     def submit(self, case_dir: Path, n_processors: int, job_name: str,
-               seed_processors_from: Path | None = None) -> str:
+               seed_processors_from: Path | None = None,
+               depend_on_job_id: str | None = None,
+               seed_from_in_script: Path | None = None) -> str:
+        """Submit a job. Two seeding modes for restart children:
+
+        * seed_processors_from — immediate restart (parent already DONE): the
+          decomposed solution is hard-linked here, before qsub.
+        * depend_on_job_id + seed_from_in_script — reserved (scheduled) restart:
+          qsub with `-W depend=afterok:<parent>` so Torque holds the job until
+          the parent finishes, and the seed hard-link is done INSIDE the job
+          (the preamble), when the parent's solution actually exists.
+        """
         remote_case_dir = self._remote_dir(case_dir)
         log_path = f"{remote_case_dir}/log.job"
         pbs_path = f"{remote_case_dir}/run.pbs"
+
+        seed_preamble = ""
+        if seed_from_in_script is not None:
+            seed_preamble = _SEED_PREAMBLE_TEMPLATE.format(
+                parent_remote=self._remote_dir(seed_from_in_script))
 
         script = JOB_SCRIPT_TEMPLATE.format(
             n_processors=n_processors,
@@ -134,6 +160,7 @@ class ClusterRunner(JobRunner):
             job_name=job_name,
             case_dir=remote_case_dir,
             foam_module=settings.CLUSTER_FOAM_MODULE,
+            seed_preamble=seed_preamble,
         )
 
         # 1. Create remote directory
@@ -162,11 +189,14 @@ class ClusterRunner(JobRunner):
                     f"failed to seed processor dirs from {parent_remote}: {err or out}"
                 )
 
-        # 3. Write PBS script and submit
+        # 3. Write PBS script and submit (qsub holds a scheduled child until its
+        # parent finishes OK via the afterok dependency).
         # Use printf to avoid heredoc quoting issues
+        depend_flag = f"-W depend=afterok:{depend_on_job_id} " if depend_on_job_id else ""
         escaped = script.replace("'", "'\\''")
         out, err = _ssh(
-            f"printf '%s' '{escaped}' > {pbs_path} && chmod +x {pbs_path} && qsub {pbs_path}"
+            f"printf '%s' '{escaped}' > {pbs_path} && chmod +x {pbs_path} "
+            f"&& qsub {depend_flag}{pbs_path}"
         )
         if not out:
             raise RuntimeError(f"qsub returned no job ID. stderr: {err}")

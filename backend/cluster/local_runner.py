@@ -65,7 +65,13 @@ def _run_allrun(case_dir: Path, job_id: str) -> None:
 
 class LocalRunner(JobRunner):
     def submit(self, case_dir: Path, n_processors: int, job_name: str,
-               seed_processors_from: Path | None = None) -> str:
+               seed_processors_from: Path | None = None,
+               depend_on_job_id: str | None = None,
+               seed_from_in_script: Path | None = None) -> str:
+        # The local runner has no scheduler dependency support, so reserved
+        # (scheduled) restarts are not offered for it; seed immediately instead.
+        if seed_from_in_script is not None and seed_processors_from is None:
+            seed_processors_from = seed_from_in_script
         _foam_cmd()  # raises immediately if OpenFOAM not installed
 
         # Seed the decomposed solution from the parent case (local copy) so a

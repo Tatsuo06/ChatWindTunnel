@@ -113,8 +113,26 @@ async def poll_status(sim_id: int, current_user: CurrentUser, db: DB):
     runner = get_runner()
     raw_status = runner.status(sim.job_id)
 
+    # A reserved (held) child depends on its parent via Torque afterok. If the
+    # parent fails, Torque drops the held job, so its job id "vanishes" and reads
+    # as DONE — resolve that against the parent so a failed parent fails the child
+    # rather than falsely completing it.
+    if sim.status == SimulationStatus.scheduled and sim.parent_id:
+        parent = (await db.execute(
+            select(Simulation).where(Simulation.id == sim.parent_id))).scalar_one_or_none()
+        if parent and parent.status == SimulationStatus.failed:
+            sim.status = SimulationStatus.failed
+            sim.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+            return JobStatusResponse(sim_id=sim.id, status=sim.status, job_id=sim.job_id)
+        if raw_status == "DONE" and (not parent or parent.status != SimulationStatus.done):
+            # Job read as gone while the parent has not finished — a transient
+            # qstat miss; keep it reserved rather than mark it complete.
+            return JobStatusResponse(sim_id=sim.id, status=sim.status, job_id=sim.job_id)
+
     status_map = {
         "PENDING": SimulationStatus.meshing,
+        "SCHEDULED": SimulationStatus.scheduled,
         "RUNNING": SimulationStatus.running,
         "DONE": SimulationStatus.done,
         "FAILED": SimulationStatus.failed,
@@ -122,6 +140,11 @@ async def poll_status(sim_id: int, current_user: CurrentUser, db: DB):
     new_status = status_map.get(raw_status, SimulationStatus.running)
 
     if new_status != sim.status:
+        # Record start time when a reserved child is released and begins running.
+        if (sim.status == SimulationStatus.scheduled
+                and new_status in (SimulationStatus.meshing, SimulationStatus.running)
+                and not sim.started_at):
+            sim.started_at = datetime.now(timezone.utc)
         sim.status = new_status
         if new_status in (SimulationStatus.done, SimulationStatus.failed):
             sim.finished_at = datetime.now(timezone.utc)
@@ -248,6 +271,7 @@ class RestartRequest(BaseModel):
     gas_density_ratio: float | None = None
     source_position: list | None = None
     source_rate: float | None = None
+    source_radius: float | None = None      # release region radius [m]; 0 = single-cell point source
     gas_source_start_time: float | None = None
     gas_source_stop_time: float | None = None
     gas_max_co: float | None = None        # gas stage adjustTimeStep maxCo (higher = faster/less stable)
@@ -272,10 +296,23 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
     parent = await _get_sim_with_geo(sim_id, db)
     if current_user.role != UserRole.admin and parent.geometry.project.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
-    if parent.status not in (SimulationStatus.done, SimulationStatus.failed):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only restart DONE or FAILED jobs")
     if not parent.case_dir:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No case directory found")
+
+    # Reserve (schedule) the child when the parent is still queued/running/held
+    # on the cluster: build the child now and let Torque hold it (afterok) until
+    # the parent finishes, seeding itself at run time. Otherwise the parent must
+    # already be finished (immediate restart).
+    runner = get_runner()
+    _is_cluster = isinstance(runner, ClusterRunner)
+    scheduled = (_is_cluster and bool(parent.job_id)
+                 and parent.status in (SimulationStatus.meshing,
+                                        SimulationStatus.running,
+                                        SimulationStatus.scheduled))
+    if not scheduled and parent.status not in (SimulationStatus.done, SimulationStatus.failed):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Can only restart a DONE/FAILED job, or reserve a child on a "
+                                   "running cluster job")
     child_name = (body.name or "").strip()
     if not child_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Child case name is required")
@@ -295,7 +332,7 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
             build_restart_case(child_dir, _new_end)
 
     elif body.mode == "unsteady":
-        if parent.status != SimulationStatus.done:
+        if parent.status != SimulationStatus.done and not scheduled:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="LES transition requires a completed (DONE) steady run")
         turb = parent.parameters.get("turbulence_model", "kOmegaSST")
@@ -317,7 +354,7 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
             build_les_restart_case(child_dir, new_params)
 
     elif body.mode == "gas":
-        if parent.status != SimulationStatus.done:
+        if parent.status != SimulationStatus.done and not scheduled:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="Gas-dispersion restart requires a completed (DONE) run")
         if parent.parameters.get("gas_les"):
@@ -370,6 +407,8 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
             new_params["source_position"] = body.source_position
         if body.source_rate is not None:
             new_params["source_rate"] = body.source_rate
+        if body.source_radius is not None:
+            new_params["source_radius"] = body.source_radius
         new_solver_type = SimulatorType.unsteady
 
         # A steady parent seeds the gas stage directly; when developed turbulence
@@ -400,8 +439,7 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
     parent_dir = Path(parent.case_dir)
     child_dir = Path(child.case_dir)
 
-    runner = get_runner()
-    if isinstance(runner, ClusterRunner):
+    if _is_cluster:
         n_processors = settings.CLUSTER_N_PROCESSORS
     else:
         import os
@@ -410,12 +448,23 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
     try:
         copy_case_for_restart(parent_dir, child_dir)
         _build(child_dir)
-        job_id = runner.submit(
-            case_dir=child_dir,
-            n_processors=n_processors,
-            job_name=f"cwt_{child.id}",
-            seed_processors_from=parent_dir,
-        )
+        if scheduled:
+            # Reserve: Torque holds the child until the parent job finishes OK,
+            # then it seeds itself from the parent's decomposed solution.
+            job_id = runner.submit(
+                case_dir=child_dir,
+                n_processors=n_processors,
+                job_name=f"cwt_{child.id}",
+                depend_on_job_id=parent.job_id,
+                seed_from_in_script=parent_dir,
+            )
+        else:
+            job_id = runner.submit(
+                case_dir=child_dir,
+                n_processors=n_processors,
+                job_name=f"cwt_{child.id}",
+                seed_processors_from=parent_dir,
+            )
     except Exception:
         # Roll back the half-created child so the list doesn't show a stray case
         await db.rollback()
@@ -424,8 +473,11 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
         raise
 
     child.job_id = job_id
-    child.status = SimulationStatus.running
-    child.started_at = datetime.now(timezone.utc)
+    if scheduled:
+        child.status = SimulationStatus.scheduled
+    else:
+        child.status = SimulationStatus.running
+        child.started_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(child)
 
