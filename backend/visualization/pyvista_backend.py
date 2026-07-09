@@ -102,7 +102,8 @@ class PyVistaBackend(VisualizationBackend):
                                 single_x_max: float | None = None,
                                 single_x_title: str | None = None,
                                 clamp_time: float | None = None,
-                                aero_anchor: dict | None = None) -> bytes:
+                                aero_anchor: dict | None = None,
+                                yrange_ignore: list | None = None) -> bytes:
         df = parse_force_coefficients(postproc_dir)
         if df.empty:
             return _empty_plot("No force coefficient data found")
@@ -186,6 +187,19 @@ class PyVistaBackend(VisualizationBackend):
         # for steady, seconds for an unsteady child's own stage)
         if single_x_max and single_x_max > 0:
             fig.update_xaxes(range=[min(0.0, float(df["Time"].min())), single_x_max])
+        # Fix the y-axis range from the LAST 25% of the series (the settled /
+        # converged part) so early transients — e.g. the emission-onset spikes —
+        # don't stretch the axis. In the gas stage, also ignore the lift Cz (its
+        # large compressible offset would otherwise dominate the scale).
+        cols = [c for c in ("Cx", "Cz", "CmYaw", "Cy")
+                if c in df.columns and c not in (yrange_ignore or [])]
+        tail = df.tail(max(1, len(df) // 4))
+        if cols and len(tail) > 0:
+            ymin = float(tail[cols].to_numpy().min())
+            ymax = float(tail[cols].to_numpy().max())
+            if ymax > ymin:
+                pad = 0.08 * (ymax - ymin)
+                fig.update_yaxes(range=[ymin - pad, ymax + pad])
         return pio.to_image(fig, format="png")
 
     def plot_cutting_plane(self, vtk_path: Path, field: str = "p",

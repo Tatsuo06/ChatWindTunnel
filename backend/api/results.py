@@ -326,10 +326,14 @@ async def force_coefficients(sim_id: int, current_user: CurrentUser, db: DB):
                 aero_anchor = {c: float(tail[c].mean())
                                for c in ("Cx", "Cz", "Cy") if c in tail.columns}
 
+    # Gas stage: scale the y-axis to the other coefficients, ignoring the lift Cz
+    # (it swings widely at emission and would otherwise squash the plot).
+    yrange_ignore = ["Cz"] if params.get("gas_les") else None
+
     return _png(backend.plot_force_coefficients(
         Path(sim.case_dir), only_last_phase=bool(sim.parent_id), phase_end=phase_end,
         single_x_max=single_x_max or None, single_x_title=single_x_title,
-        clamp_time=clamp_time, aero_anchor=aero_anchor))
+        clamp_time=clamp_time, aero_anchor=aero_anchor, yrange_ignore=yrange_ignore))
 
 
 @router.get("/cutting-plane")

@@ -271,18 +271,22 @@ class ClusterRunner(JobRunner):
         against anything unexpectedly large and the timeouts stop a slow
         transfer from wedging the backend.
         """
-        subdir = "cuttingPlane" if kind == "plane" else "streamLines"
+        # Relative to postProcessing/. streamLines live under sets/ (fwd + back),
+        # matching what render_animation reads — not a bare streamLines/ dir.
+        subpaths = (["cuttingPlane"] if kind == "plane"
+                    else ["sets/streamLines", "sets/streamLinesBack"])
         remote = f"{settings.CLUSTER_USER}@{settings.CLUSTER_HOST}:{self._remote_dir(case_dir)}"
         key = str(Path(settings.CLUSTER_SSH_KEY).expanduser())
         ssh_opt = f"ssh -i {key} -o StrictHostKeyChecking=no -o BatchMode=yes"
-        dest = case_dir / "postProcessing" / subdir
-        dest.mkdir(parents=True, exist_ok=True)
-        args = ["rsync", "-az", "--timeout=30", "--max-size=100m", "-e", ssh_opt,
-                f"{remote}/postProcessing/{subdir}/", f"{dest}/"]
-        try:
-            subprocess.run(args, check=False, timeout=180)
-        except subprocess.TimeoutExpired:
-            pass
+        for rel in subpaths:
+            dest = case_dir / "postProcessing" / rel
+            dest.mkdir(parents=True, exist_ok=True)
+            args = ["rsync", "-az", "--timeout=30", "--max-size=100m", "-e", ssh_opt,
+                    f"{remote}/postProcessing/{rel}/", f"{dest}/"]
+            try:
+                subprocess.run(args, check=False, timeout=180)
+            except subprocess.TimeoutExpired:
+                pass
 
     def cancel(self, job_id: str) -> None:
         _ssh(f"qdel {job_id}")

@@ -23,7 +23,8 @@ class VisualizationBackend(ABC):
                                 single_x_max: float | None = None,
                                 single_x_title: str | None = None,
                                 clamp_time: float | None = None,
-                                aero_anchor: dict | None = None) -> bytes:
+                                aero_anchor: dict | None = None,
+                                yrange_ignore: list | None = None) -> bytes:
         """Plot Cd/Cl/Cm time series from forceCoeffs postProcessing. Returns PNG bytes.
 
         only_last_phase drops inherited earlier phases (used for restart children).
