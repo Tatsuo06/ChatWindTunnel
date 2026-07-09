@@ -319,11 +319,20 @@ async def status_summary(current_user: CurrentUser, db: DB):
         loop = asyncio.get_event_loop()
         try:
             load = await loop.run_in_executor(None, runner.cluster_load)
-            db_counts["QUEUED"] = load.get("queued", 0)
-            db_counts["CLUSTER_RUNNING"] = load.get("running", 0)
+            # Per-project split by job name (cwt* = ChatWindTunnel, else ChatTowingTank)
+            db_counts["RUN_CTT"] = load.get("running_cttank", 0)
+            db_counts["RUN_CWT"] = load.get("running_cwt", 0)
+            db_counts["QUE_CTT"] = load.get("queued_cttank", 0)
+            db_counts["QUE_CWT"] = load.get("queued_cwt", 0)
             db_counts["CLUSTER_RUNNING_ALL"] = load.get("running_all", 0)
+            db_counts["CLUSTER_QUEUED_ALL"] = load.get("queued_all", 0)
             db_counts["FREE_NODES"] = load.get("free_nodes", 0)
+            db_counts["USABLE_NODES"] = load.get("usable_nodes", 0)
             db_counts["TOTAL_NODES"] = load.get("total_nodes", 0)
+            db_counts["DOWN_NODES"] = load.get("down_nodes", 0)
+            # Backward-compat keys (admin page): cluster-wide running/queued
+            db_counts["CLUSTER_RUNNING"] = load.get("running_all", 0)
+            db_counts["QUEUED"] = load.get("queued_all", 0)
         except Exception:
             pass
 

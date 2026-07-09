@@ -241,6 +241,7 @@ class RestartRequest(BaseModel):
     gas_source_start_time: float | None = None
     gas_source_stop_time: float | None = None
     les_warmup_time: float | None = None   # steady->gas: aero-LES warm-up before gas (0 = direct)
+    gas_max_co: float | None = None        # gas stage adjustTimeStep maxCo (higher = faster/less stable)
 
 
 @router.post("/restart", response_model=JobStatusResponse)
@@ -352,6 +353,8 @@ async def restart_job(sim_id: int, body: RestartRequest, current_user: CurrentUs
         }
         if body.les_anim_interval is not None:
             new_params["les_anim_interval"] = body.les_anim_interval
+        if body.gas_max_co is not None:
+            new_params["gas_max_co"] = body.gas_max_co
         if body.gas_density_ratio is not None:
             new_params["gas_density_ratio"] = body.gas_density_ratio
         if body.source_position is not None:

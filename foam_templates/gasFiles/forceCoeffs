@@ -25,6 +25,10 @@ forceCoeffs1
     patches         (motorBikeGroup);
     rho             rho;
     rhoInf          1.161;
+    pRef            1e5;         // subtract the absolute reference pressure so
+                                 // the (gauge) pressure force is aerodynamic —
+                                 // without it the ~1e5 Pa level integrated over
+                                 // a ground-mounted body gives a huge spurious Cz
     liftDir         (0 0 1);
     dragDir         (1 0 0);
     CofR            (0.72 0 0);

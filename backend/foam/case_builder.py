@@ -636,6 +636,7 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     gas_end = float(params.get("gas_end_time", 0.7))
     gas_dt = float(params.get("gas_delta_t", 1e-4))
     ratio = float(params.get("gas_density_ratio", 0.07))
+    max_co = float(params.get("gas_max_co", 1.0))
     n_steps = max(1, round(gas_end / gas_dt))
     # Phase-time semantics for the shared writers (streamLines/cuttingPlane
     # intervals, animation t_max): the gas stage is now "the" LES stage
@@ -645,8 +646,10 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     ctrl = (GAS_FILES / "controlDict").read_text()
     ctrl = _set_value(ctrl, "endTime", str(gas_end))
     ctrl = _set_value(ctrl, "deltaT", str(gas_dt))
-    # Courant-adaptive stepping: cap dt at the requested value, shrink on demand
+    # Courant-adaptive stepping: cap dt at the requested value, shrink on demand;
+    # maxCo controls how aggressively (higher = faster but less stable)
     ctrl = _set_value(ctrl, "maxDeltaT", str(gas_dt))
+    ctrl = _set_value(ctrl, "maxCo", str(max_co))
     ctrl = _set_value(ctrl, "writeInterval", str(min(1000, n_steps)))
     (case_dir / "system" / "controlDict.gas").write_text(ctrl)
     for fname in ("fvSchemes", "fvSolution"):
@@ -739,6 +742,7 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
         "source_rate": rate,
         "gas_source_start_time": start,
         "gas_source_stop_time": stop,
+        "gas_max_co": max_co,
         "les_end_time": gas_end,
         "les_delta_t": gas_dt,
     })

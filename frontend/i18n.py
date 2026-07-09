@@ -35,6 +35,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "running": "Running:",
         "running_all": "Running (all users):",
         "free_nodes": "Free nodes:",
+        "down_excluded": "excl. down/offline",
         "queued": "Queued:",
 
         # --- projects ---
@@ -162,6 +163,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "conv_live_note": "Live view of a running job — press Refresh (or interact with the page) to update. Cluster logs are fetched at most every 20 s.",
         "mesh_live_note": "The surface mesh becomes available once the job finishes. Press Refresh to check the status and load it when ready.",
         "mesh_child_note": "This is a restart child case; it reuses the parent case's mesh. See the parent case for mesh details.",
+        "go_to_parent": "▶ Go to parent case",
         "phase1_label": "Phase 1/2: RAS ({})",
         "phase2_label": "Phase 2/2: LES ({})",
         "residuals_phase": "Phase",
@@ -204,6 +206,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "les_warmup_time_lbl": "Aero-LES warm-up time [s]",
         "les_warmup_time_help": "First develop turbulence with an incompressible LES (pisoFoam) for this long, then hand the field to the gas stage. 0 = seed gas straight from the steady solution (can stall). ~0.05 s recommended.",
         "les_warmup_note": "With a warm-up, the gas stage restarts at time 0 after the aero-LES phase — the emission start/stop times below are measured within the gas stage.",
+        "gas_max_co": "Max Courant number (gas)",
+        "gas_max_co_lbl": "Max Courant number (gas)",
+        "gas_max_co_help": "adjustTimeStep target for the gas stage. Higher = larger time steps and a faster run, but less stable. 1.0 is safe; try 3–5 to speed up.",
         "gas_start_after_end": "Emission start time must be earlier than the end time.",
         "restart_les_btn": "🌀 Start LES",
         "restart_les_note": "Starts pisoFoam from the converged steady solution (no separate RAS phase needed).",
@@ -348,6 +353,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "running": "実行中:",
         "running_all": "実行中（全ユーザー）:",
         "free_nodes": "空きノード:",
+        "down_excluded": "down/offline除外",
         "queued": "待機中:",
 
         # --- projects ---
@@ -472,6 +478,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "conv_live_note": "実行中ジョブの途中経過です。更新ボタン（または画面操作）で最新化されます。クラスターからのログ取得は最大20秒間隔です。",
         "mesh_live_note": "サーフェスメッシュはジョブ完了後に表示できます。更新ボタンでステータスを確認し、準備でき次第読み込みます。",
         "mesh_child_note": "これはリスタートの子ケースです。メッシュは親ケースと共通なので、親ケースを参照してください。",
+        "go_to_parent": "▶ 親ケースへ移動",
         "phase1_label": "Phase 1/2: RAS ({})",
         "phase2_label": "Phase 2/2: LES ({})",
         "residuals_phase": "フェーズ",
@@ -514,6 +521,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "les_warmup_time_lbl": "空力LESウォームアップ時間 [s]",
         "les_warmup_time_help": "まず非圧縮LES(pisoFoam)でこの時間だけ乱流場を発達させ、その後ガス段に引き渡します。0=定常解から直接ガスをシード(進みが遅くなることあり)。0.05s程度を推奨。",
         "les_warmup_note": "ウォームアップ有りの場合、空力LESの後にガス段が時刻0から再スタートします。下の噴出開始/停止時刻はガス段内の時刻です。",
+        "gas_max_co": "最大クーラン数（ガス）",
+        "gas_max_co_lbl": "最大クーラン数（ガス）",
+        "gas_max_co_help": "ガス段のadjustTimeStep目標値。大きいほど時間刻みが大きく速いが不安定寄り。1.0が安全、3〜5で高速化を試せます。",
         "gas_start_after_end": "噴出開始時刻は終了時間より前にしてください。",
         "restart_les_btn": "🌀 LES開始",
         "restart_les_note": "収束した定常解を初期値としてpisoFoamを開始します（RASフェーズの再計算は不要）。",

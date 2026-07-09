@@ -196,12 +196,21 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
                 min_value=0.0, step=0.05, format="%.4f", key=f"gr_stop_{sim_id}",
                 help=t("gas_source_stop_time_help"),
             )
-        gas_anim = st.number_input(
-            t("les_anim_interval_lbl"),
-            value=int(params.get("les_anim_interval", 100)),
-            min_value=1, step=10, key=f"gr_anim_{sim_id}",
-            help=t("anim_interval_help"),
-        )
+        ga1, ga2 = st.columns(2)
+        with ga1:
+            gas_anim = st.number_input(
+                t("les_anim_interval_lbl"),
+                value=int(params.get("les_anim_interval", 100)),
+                min_value=1, step=10, key=f"gr_anim_{sim_id}",
+                help=t("anim_interval_help"),
+            )
+        with ga2:
+            gas_maxco = st.number_input(
+                t("gas_max_co_lbl"),
+                value=float(params.get("gas_max_co", 1.0)),
+                min_value=0.1, step=0.5, format="%.1f", key=f"gr_maxco_{sim_id}",
+                help=t("gas_max_co_help"),
+            )
         child_name = st.text_input(
             t("child_case_name"),
             value=f"{sim.get('name', '')} — GAS",
@@ -220,7 +229,7 @@ def _show_gas_restart_expander(sim: dict, sim_id: int) -> None:
                         sim_id, child_name.strip(), gas_end, gas_dt, gas_model,
                         gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
                         gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
-                        les_anim_interval=int(gas_anim),
+                        les_anim_interval=int(gas_anim), gas_max_co=float(gas_maxco),
                     )
                 if result:
                     st.success(t("restart_ok", result.get("job_id")))
@@ -287,7 +296,7 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
             min_value=0.0, step=0.05, format="%.4f", key=f"grs_stop_{sim_id}",
             help=t("gas_source_stop_time_help"),
         )
-    gm1, gm2 = st.columns(2)
+    gm1, gm2, gm3 = st.columns(3)
     with gm1:
         gas_model = st.selectbox(
             t("les_model_lbl"), ["kOmegaSSTDDES", "kOmegaSSTIDDES"], key=f"grs_model_{sim_id}",
@@ -298,6 +307,13 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
             value=int(params.get("les_anim_interval", 100)),
             min_value=1, step=10, key=f"grs_anim_{sim_id}",
             help=t("anim_interval_help"),
+        )
+    with gm3:
+        gas_maxco = st.number_input(
+            t("gas_max_co_lbl"),
+            value=float(params.get("gas_max_co", 1.0)),
+            min_value=0.1, step=0.5, format="%.1f", key=f"grs_maxco_{sim_id}",
+            help=t("gas_max_co_help"),
         )
     child_name = st.text_input(
         t("child_case_name"),
@@ -318,6 +334,7 @@ def _show_gas_direct_form(sim: dict, sim_id: int, params: dict) -> None:
                     gas["gas_density_ratio"], gas["source_position"], gas["source_rate"],
                     gas_source_start_time=gas_start, gas_source_stop_time=gas_stop,
                     les_anim_interval=int(gas_anim), les_warmup_time=float(warmup),
+                    gas_max_co=float(gas_maxco),
                 )
             if result:
                 st.success(t("restart_ok", result.get("job_id")))
@@ -981,8 +998,11 @@ with right:
     with tab_mesh:
         _mesh_live = current_status in ("MESHING", "RUNNING")
         if sim.get("parent_id"):
-            # Restart children reuse the parent's mesh — nothing to show here.
+            # Restart children reuse the parent's mesh — point to the parent.
             st.info(t("mesh_child_note"))
+            if st.button(t("go_to_parent"), key=f"go_parent_{sim_id}"):
+                st.session_state["sim_id"] = sim["parent_id"]
+                st.rerun()
         elif not _is_done and not _mesh_live:
             st.info(t("sim_pending_msg"))
         elif _mesh_live:

@@ -213,18 +213,23 @@ class ClusterRunner(JobRunner):
         remote = f"{settings.CLUSTER_USER}@{settings.CLUSTER_HOST}:{self._remote_dir(case_dir)}"
         key = str(Path(settings.CLUSTER_SSH_KEY).expanduser())
         ssh_opt = f"ssh -i {key} -o StrictHostKeyChecking=no -o BatchMode=yes"
-        subprocess.run(
-            ["rsync", "-az", "--include=log.*Foam", "--exclude=*",
-             "-e", ssh_opt, f"{remote}/", f"{case_dir}/"],
-            check=False,
-        )
-        (case_dir / "postProcessing").mkdir(exist_ok=True)
-        subprocess.run(
-            ["rsync", "-az", "-e", ssh_opt,
+        # Guard against pathological cases: a stalled gas run can grow its solver
+        # log to tens of GB. --max-size skips such files (they can't be displayed
+        # live anyway) and the timeouts stop a slow transfer from wedging the
+        # backend (rsync --timeout = idle I/O; subprocess timeout = hard cap).
+        for args in (
+            ["rsync", "-az", "--timeout=30", "--max-size=300m",
+             "--include=log.*Foam", "--exclude=*", "-e", ssh_opt,
+             f"{remote}/", f"{case_dir}/"],
+            ["rsync", "-az", "--timeout=30", "--max-size=300m", "-e", ssh_opt,
              f"{remote}/postProcessing/forceCoeffs1/",
              f"{case_dir / 'postProcessing' / 'forceCoeffs1'}/"],
-            check=False,
-        )
+        ):
+            (case_dir / "postProcessing").mkdir(exist_ok=True)
+            try:
+                subprocess.run(args, check=False, timeout=90)
+            except subprocess.TimeoutExpired:
+                pass
 
     def cancel(self, job_id: str) -> None:
         _ssh(f"qdel {job_id}")
@@ -237,31 +242,44 @@ class ClusterRunner(JobRunner):
         return {"queued": queued, "running": running}
 
     def cluster_load(self) -> dict[str, int]:
-        """Cluster-wide load in a single ssh round trip.
+        """Cluster-wide load in a single ssh round trip. Jobs are parsed from the
+        default `qstat` (all jobs on this shared account) and split by state
+        (R running / Q queued) AND by project via the job name: `cwt*` is
+        ChatWindTunnel, everything else (`case_*`, …) is ChatTowingTank.
 
-        Returns:
-          queued / running   : this user's Q / R job counts (qstat -u)
-          running_all         : R jobs across ALL users (not just ChatWindTunnel)
-          free_nodes / total_nodes : from pbsnodes -l all
+        Nodes come from `pbsnodes -l all`; the usable count excludes both `down`
+        and `offline` nodes, so free_nodes / usable_nodes reflects actual
+        availability (total_nodes / down_nodes are kept for reference).
         """
         out, _ = _ssh(
-            "qstat 2>/dev/null; echo '===MINE==='; "
-            f"qstat -u {settings.CLUSTER_USER} 2>/dev/null; echo '===NODES==='; "
-            "pbsnodes -l all 2>/dev/null"
+            "qstat 2>/dev/null; echo '===NODES==='; pbsnodes -l all 2>/dev/null"
         )
-        all_part, rest = (out.split("===MINE===", 1) + [""])[:2]
-        mine_part, nodes_part = (rest.split("===NODES===", 1) + [""])[:2]
+        jobs_part, nodes_part = (out.split("===NODES===", 1) + [""])[:2]
 
-        def _count(text: str, state: str) -> int:
-            return sum(1 for ln in text.splitlines() if re.search(rf"\s+{state}\s+", ln))
+        r_ctt = r_cwt = q_ctt = q_cwt = 0
+        for ln in jobs_part.splitlines():
+            f = ln.split()
+            # a job row: "<id>.<host>  <name>  <user>  <time>  <S>  <queue>"
+            if len(f) < 6 or not re.match(r"^\d+\.", f[0]):
+                continue
+            name, state = f[1], f[-2]
+            is_cwt = name.startswith("cwt")
+            if state == "R":
+                r_cwt += is_cwt; r_ctt += not is_cwt
+            elif state == "Q":
+                q_cwt += is_cwt; q_ctt += not is_cwt
 
         node_lines = [ln for ln in nodes_part.splitlines()
                       if ln.strip() and "." in ln.split()[0]]
         free_nodes = sum(1 for ln in node_lines if re.search(r"\bfree\b", ln))
+        down_nodes = sum(1 for ln in node_lines
+                         if re.search(r"\b(down|offline)\b", ln))
+        total_nodes = len(node_lines)
         return {
-            "queued": _count(mine_part, "Q"),
-            "running": _count(mine_part, "R"),
-            "running_all": _count(all_part, "R"),
+            "running_cttank": r_ctt, "running_cwt": r_cwt,
+            "queued_cttank": q_ctt, "queued_cwt": q_cwt,
+            "running_all": r_ctt + r_cwt, "queued_all": q_ctt + q_cwt,
             "free_nodes": free_nodes,
-            "total_nodes": len(node_lines),
+            "usable_nodes": total_nodes - down_nodes,
+            "total_nodes": total_nodes, "down_nodes": down_nodes,
         }

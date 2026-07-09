@@ -264,17 +264,26 @@ def main():
         summary = get_status_summary()
         running_all = summary.get("CLUSTER_RUNNING_ALL")
         if running_all is not None:
-            # Cluster runner active — show cluster-wide load (all users)
-            free_nodes  = summary.get("FREE_NODES")
-            total_nodes = summary.get("TOTAL_NODES") or 0
-            cluster_queued = summary.get("QUEUED", 0)
+            # Cluster runner active — cluster-wide load, split R/Q and by project
+            # (CWT = ChatWindTunnel = cwt* jobs, CTTank = ChatTowingTank = the rest)
+            r_cwt = summary.get("RUN_CWT", 0); r_ctt = summary.get("RUN_CTT", 0)
+            q_cwt = summary.get("QUE_CWT", 0); q_ctt = summary.get("QUE_CTT", 0)
+            queued_all = summary.get("CLUSTER_QUEUED_ALL", 0)
+            free_nodes   = summary.get("FREE_NODES")
+            usable_nodes = summary.get("USABLE_NODES") or 0
+            down_nodes   = summary.get("DOWN_NODES", 0)
             st.caption(t("cluster_status"))
-            st.markdown(f"🟡 {t('running_all')} **{running_all}**")
+            st.markdown(f"🟡 {t('running')} **{running_all}** "
+                        f"<small>(CWT {r_cwt} / CTTank {r_ctt})</small>",
+                        unsafe_allow_html=True)
+            st.markdown(f"🔵 {t('queued')} **{queued_all}** "
+                        f"<small>(CWT {q_cwt} / CTTank {q_ctt})</small>",
+                        unsafe_allow_html=True)
             if free_nodes is not None:
-                nodes_txt = f"{free_nodes} / {total_nodes}" if total_nodes else f"{free_nodes}"
-                st.markdown(f"🟢 {t('free_nodes')} **{nodes_txt}**")
-            if cluster_queued:
-                st.markdown(f"🔵 {t('queued')} **{cluster_queued}**")
+                nodes_txt = f"{free_nodes} / {usable_nodes}" if usable_nodes else f"{free_nodes}"
+                st.markdown(f"🟢 {t('free_nodes')} **{nodes_txt}** "
+                            f"<small>({t('down_excluded')} {down_nodes})</small>",
+                            unsafe_allow_html=True)
             st.divider()
         else:
             # Local runner / cluster unreachable — fall back to DB active counts
