@@ -664,10 +664,16 @@ def build_gas_les_restart_case(case_dir: Path, params: dict) -> Path:
     # density normalises Cd/Cl to match the incompressible aero LES convention,
     # so the two runs are directly comparable. Overwrites the copied aero one.
     fc = (GAS_FILES / "forceCoeffs").read_text()
-    velocity = params.get("velocity_mps", 20.0)
-    aref = params.get("aref", 0.75)
-    lref = params.get("lref", 1.42)
-    cofr = params.get("cofr", [0.72, 0.0, 0.0])
+    # aref/lref/cofr must come from the parent's AUTO-COMPUTED values, which live
+    # in the copied case_params.json — the DB params only hold user/default
+    # values, so reading from `params` would fall back to the motorBike defaults
+    # and make the gas coefficients non-comparable to the aero (incompressible) run.
+    _cp_file = case_dir / "case_params.json"
+    _cp = json.loads(_cp_file.read_text()) if _cp_file.exists() else {}
+    velocity = _cp.get("velocity_mps", params.get("velocity_mps", 20.0))
+    aref = _cp.get("aref", params.get("aref", 0.75))
+    lref = _cp.get("lref", params.get("lref", 1.42))
+    cofr = _cp.get("cofr", params.get("cofr", [0.72, 0.0, 0.0]))
     rho_air = round(1.0e5 * 0.02896 / (8.314 * 300.0), 4)  # p*M/(R*T) at gas init state
     fc = _set_value(fc, "magUInf", str(velocity))
     fc = _set_value(fc, "Aref", str(aref))

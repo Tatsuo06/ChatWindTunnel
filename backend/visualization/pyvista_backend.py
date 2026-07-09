@@ -101,7 +101,8 @@ class PyVistaBackend(VisualizationBackend):
                                 phase_end: dict | None = None,
                                 single_x_max: float | None = None,
                                 single_x_title: str | None = None,
-                                clamp_time: float | None = None) -> bytes:
+                                clamp_time: float | None = None,
+                                aero_anchor: dict | None = None) -> bytes:
         df = parse_force_coefficients(postproc_dir)
         if df.empty:
             return _empty_plot("No force coefficient data found")
@@ -118,6 +119,19 @@ class PyVistaBackend(VisualizationBackend):
         # phases); show only the child's own stage.
         if only_last_phase and "Phase" in df.columns and df["Phase"].nunique() > 1:
             df = df[df["Phase"] == df["Phase"].max()]
+
+        # Drift correction (gas stage): the compressible absolute-pressure force
+        # over an open body surface carries a spurious constant offset. Calibrate
+        # it from the first samples (offset = early mean - parent aero value) and
+        # subtract, so the plotted coefficients sit on the correct aero baseline.
+        corrected = False
+        if aero_anchor:
+            n = max(1, min(20, len(df)))
+            for col, ref in aero_anchor.items():
+                if col in df.columns and ref is not None:
+                    offset = float(df[col].head(n).mean()) - float(ref)
+                    df[col] = df[col] - offset
+                    corrected = True
 
         def _phase_range(pdf, phase):
             # x-axis upper bound = planned endTime for this phase (progress view)
@@ -161,7 +175,8 @@ class PyVistaBackend(VisualizationBackend):
                 fig.add_trace(go.Scatter(x=df["Time"], y=df[col], name=col, mode="lines"))
 
         fig.update_layout(
-            title="Force / Moment Coefficients",
+            title="Force / Moment Coefficients"
+                  + (" (drift-corrected)" if corrected else ""),
             xaxis_title=single_x_title or "Iteration / Time",
             yaxis_title="Coefficient",
             template="plotly_white",

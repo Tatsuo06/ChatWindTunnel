@@ -266,10 +266,26 @@ async def force_coefficients(sim_id: int, current_user: CurrentUser, db: DB):
     else:
         single_x_title = "Iteration"
         single_x_max = end_time
+
+    # Gas stage: the compressible force carries a spurious constant offset (open
+    # surface x absolute pressure). Anchor to the parent's incompressible aero
+    # coefficients (mean of its converged tail) so the plot is drift-corrected.
+    aero_anchor = None
+    if sim.parent_id and params.get("gas_les"):
+        from backend.visualization.parsers import parse_force_coefficients
+        parent = (await db.execute(
+            select(Simulation).where(Simulation.id == sim.parent_id))).scalar_one_or_none()
+        if parent and parent.case_dir:
+            pdf = parse_force_coefficients(Path(parent.case_dir))
+            if not pdf.empty:
+                tail = pdf.tail(max(1, len(pdf) // 5))
+                aero_anchor = {c: float(tail[c].mean())
+                               for c in ("Cx", "Cz", "Cy") if c in tail.columns}
+
     return _png(backend.plot_force_coefficients(
         Path(sim.case_dir), only_last_phase=bool(sim.parent_id), phase_end=phase_end,
         single_x_max=single_x_max or None, single_x_title=single_x_title,
-        clamp_time=clamp_time))
+        clamp_time=clamp_time, aero_anchor=aero_anchor))
 
 
 @router.get("/cutting-plane")
