@@ -933,11 +933,6 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
     ny = max(8, round(nx * 2 * dom_yhalf / Lx))
     nz = max(8, round(nx * Lz           / Lx))
 
-    # ---- snappyHexMesh refinement box (pre-rotation fallback only) ----
-    ref_y = round(0.8 * L, 2)
-    refbox_min = [round(x0 - 0.3 * L, 2), -ref_y, dom_zmin]
-    refbox_max = [round(x1 + 0.7 * L, 2),  ref_y, round(z1 + H, 2)]
-
     # ---- seed point: upstream of body, on centreline, mid-domain height ----
     loc = [round((dom_xmin + x0) / 2, 2), 0.0, round((dom_zmin + dom_zmax) / 2, 2)]
 
@@ -956,8 +951,6 @@ def _auto_domain_params(stl_path: Path, nx: int = 80) -> dict:
         "blockmesh_nx": nx,
         "blockmesh_ny": ny,
         "blockmesh_nz": nz,
-        "refbox_min":       refbox_min,
-        "refbox_max":       refbox_max,
         "location_in_mesh": loc,
         "aref": aref,
         "lref": lref,

@@ -161,8 +161,10 @@ async def geometry_preview(sim_id: int, current_user: CurrentUser, db: DB):
         if domain is None:
             domain = None
 
-    # RefinementBox: always from rotated STL bounding box + 20% margin
-    refbox = domain  # fallback to domain params if refbox computation fails
+    # RefinementBox: always from rotated STL bounding box + 20% margin.
+    # If that computation fails, omit the overlay entirely rather than drawing a
+    # box that does not match the real mesh.
+    refbox = None
     try:
         refbox = {**(domain or {}), **_refbox_from_rotated_stl(stl_path)}
     except Exception:

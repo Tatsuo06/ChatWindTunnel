@@ -170,6 +170,13 @@ Implemented in `case_builder._refbox_from_rotated_stl()`. Called in `build_case(
 
 > **Evaluated & rejected: `searchableRotatedBox` (tilted refinement box).** A tilted box hugging the rotated geometry was tried to cut cells (vs the AABB, whose corners are empty fluid). On the real case it barely helped — see `docs/rotated_refbox_evaluation.md`. Reverted; the axis-aligned box above is the current behaviour.
 
+**Which refinement levels are user-configurable vs fixed** (`case_builder._write_snappy_hex_mesh()`):
+
+- **Surface level `refinementSurfaces { object { level (min max); } }`** — *user-configurable*. Written from params `refinement_min`/`refinement_max` (defaults 5/6; also settable via the `set_solver_settings` chat tool). The regex has `count=1` so it rewrites only the first `level (...)` (the surface entry).
+- **refinementBox internal level `levels ((1E15 4))`** — **fixed at 4** in the templates. `_write_snappy_hex_mesh` rewrites only the box's `min`/`max` coordinates, never its level. ⚠️ Because the surface level is user-settable but the box level is not, setting `refinement_max ≤ 4` makes the box interior *finer* than the surface — usually not intended.
+- **Feature-edge level `features { file "…eMesh"; level 6; }`** — **fixed at 6** in the steady/dispersion templates (single-value `level 6;` is not matched by the `level (` paren regex). The legacy `motorBike_LES` template has features commented out (disabled).
+- **`nCellsBetweenLevels 3`, `resolveFeatureAngle 30`, `maxGlobalCells`** (2M steady/dispersion, 7M legacy LES) — template-fixed, not exposed.
+
 **insideSurfaces is always set in snappyHexMeshDict**: Both templates (`motorBike/system/snappyHexMeshDict` and `motorBike_LES/motorBike/system/snappyHexMeshDict`) include `insideSurfaces (motorBike);` in `castellatedMeshControls`. This explicitly removes cells inside the geometry surface during the castellated mesh phase. Unlike `locationInMesh` (which keeps cells reachable from the seed point), `insideSurfaces` works even for open/non-watertight STLs — it uses surface intersection tests rather than flood fill. This is required for geometries like ship hulls (e.g. JBC) that have open edges, where snappyHexMesh would otherwise mesh the interior of the hull. Cases built before Case #145 do not have this setting.
 
 **LLM abstraction via LiteLLM**: `backend/chat/agent.py` calls LiteLLM with `model="openai/<model>"` and `api_base` pointing to LM Studio. To switch to Claude or OpenAI, only `.env` values change — no code changes needed.
