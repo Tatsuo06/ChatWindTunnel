@@ -101,7 +101,8 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "",
                           rate_help_key: str | None = None,
                           rate_default: float = 1.0,
                           rate_step: float = 0.5,
-                          rate_format: str | None = None) -> dict:
+                          rate_format: str | None = None,
+                          disabled: bool = False) -> dict:
     """Shared gas-release widgets (preset / density ratio / source / rate).
 
     The emission rate has different semantics per context (relative units in
@@ -115,7 +116,7 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "",
     gcol1, gcol2, gcol3 = st.columns(3)
     with gcol1:
         preset_sel = st.selectbox(t("gas_preset"), list(_presets.keys()), index=2,
-                                  key=f"{key_prefix}gas_preset")
+                                  key=f"{key_prefix}gas_preset", disabled=disabled)
     with gcol2:
         _preset_ratio = _presets[preset_sel]
         ratio = st.number_input(
@@ -123,7 +124,7 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "",
             value=float(_preset_ratio if _preset_ratio is not None
                         else params.get("gas_density_ratio", 0.07)),
             min_value=0.01, step=0.1, format="%.2f",
-            disabled=_preset_ratio is not None,
+            disabled=disabled or _preset_ratio is not None,
             key=f"{key_prefix}gas_ratio",
         )
         if _preset_ratio is not None:
@@ -134,24 +135,24 @@ def _gas_settings_widgets(params: dict, key_prefix: str = "",
             value=float(params.get("source_rate", rate_default)),
             min_value=0.0, step=rate_step, format=rate_format,
             help=t(rate_help_key) if rate_help_key else None,
-            key=f"{key_prefix}gas_rate",
+            key=f"{key_prefix}gas_rate", disabled=disabled,
         )
     auto_src = st.checkbox(t("source_auto"),
                            value=params.get("source_position") is None,
-                           key=f"{key_prefix}gas_autosrc")
+                           key=f"{key_prefix}gas_autosrc", disabled=disabled)
     src_pos = None
     if not auto_src:
         _sp = params.get("source_position") or [0.0, 0.0, 1.0]
         scol1, scol2, scol3 = st.columns(3)
         with scol1:
             sx = st.number_input(t("source_x"), value=float(_sp[0]), step=0.1,
-                                 format="%.3f", key=f"{key_prefix}gas_sx")
+                                 format="%.3f", key=f"{key_prefix}gas_sx", disabled=disabled)
         with scol2:
             sy = st.number_input(t("source_y"), value=float(_sp[1]), step=0.1,
-                                 format="%.3f", key=f"{key_prefix}gas_sy")
+                                 format="%.3f", key=f"{key_prefix}gas_sy", disabled=disabled)
         with scol3:
             sz = st.number_input(t("source_z"), value=float(_sp[2]), step=0.1,
-                                 format="%.3f", key=f"{key_prefix}gas_sz")
+                                 format="%.3f", key=f"{key_prefix}gas_sz", disabled=disabled)
         src_pos = [sx, sy, sz]
     return {"gas_density_ratio": ratio, "source_rate": rate, "source_position": src_pos}
 
@@ -891,10 +892,18 @@ with right:
 
     # ── Setup ──────────────────────────────────────────────────
     with tab_setup:
+        # Solver inputs are locked once the case has been submitted (scheduled /
+        # meshing / running / done). The backend rejects such edits too; this
+        # just makes the read-only state visible. PENDING and FAILED stay editable.
+        _setup_locked = current_status in ("SCHEDULED", "MESHING", "RUNNING", "DONE")
+
         if geo and geo.get("stl_file_path"):
             data = api.get_geometry_3d_data(sim_id)
             if data:
                 _show_geometry_3d(data)
+
+        if _setup_locked:
+            st.info(t("setup_locked_note"))
 
         st.markdown(f"#### {t('wind_settings')}")
         col1, col2, col3, col4 = st.columns(4)
@@ -902,21 +911,21 @@ with right:
             velocity = st.number_input(
                 t("wind_speed"),
                 value=float(sim.get("parameters", {}).get("velocity_mps", 20.0)),
-                min_value=0.1, step=1.0,
+                min_value=0.1, step=1.0, disabled=_setup_locked,
             )
         with col2:
-            yaw   = st.number_input(t("yaw_angle"),   value=float(sim.get("yaw_deg", 0.0)),   step=5.0)
+            yaw   = st.number_input(t("yaw_angle"),   value=float(sim.get("yaw_deg", 0.0)),   step=5.0, disabled=_setup_locked)
         with col3:
-            pitch = st.number_input(t("pitch_angle"), value=float(sim.get("pitch_deg", 0.0)), step=5.0)
+            pitch = st.number_input(t("pitch_angle"), value=float(sim.get("pitch_deg", 0.0)), step=5.0, disabled=_setup_locked)
         with col4:
-            roll  = st.number_input(t("roll_angle"),  value=float(sim.get("roll_deg", 0.0)),  step=5.0)
+            roll  = st.number_input(t("roll_angle"),  value=float(sim.get("roll_deg", 0.0)),  step=5.0, disabled=_setup_locked)
 
         # ── Gas dispersion settings (dispersion cases only) ─────────
         gas_updates = {}
         if sim.get("parameters", {}).get("case_type") == "dispersion":
             st.markdown(f"#### {t('gas_settings')}")
             st.caption(t("boussinesq_note"))
-            gas_updates = _gas_settings_widgets(sim.get("parameters", {}))
+            gas_updates = _gas_settings_widgets(sim.get("parameters", {}), disabled=_setup_locked)
 
         if geo and geo.get("stl_file_path"):
             bbox = api.get_geometry_bbox(geo_id)
@@ -930,7 +939,7 @@ with right:
                 re_b = velocity * lref_b / nu_b
                 st.caption(f"Re = {re_b:,.0f}  (U = {velocity} m/s, L = {lref_b:.3f} m, ν = {nu_b:.2g} m²/s)")
 
-        if st.button(t("save_settings")):
+        if st.button(t("save_settings"), disabled=_setup_locked):
             params = {**sim.get("parameters", {}), "velocity_mps": velocity, **gas_updates}
             result = api.update_simulation(sim_id, yaw_deg=yaw, pitch_deg=pitch, roll_deg=roll, parameters=params)
             if result:

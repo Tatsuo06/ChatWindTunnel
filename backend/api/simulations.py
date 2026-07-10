@@ -398,12 +398,18 @@ async def update_simulation(sim_id: int, body: SimulationUpdate, current_user: C
     _assert_access(sim, current_user)
 
     # Metadata (name/description) is safe to edit any time; solver inputs are
-    # locked while the job is running
+    # locked once the job has been submitted — while it is queued (scheduled),
+    # meshing/running, or already finished (done). Editing them afterwards is
+    # meaningless: the case dir is already built and the results are computed.
+    # Only PENDING (not yet submitted) and FAILED (fix & resubmit) stay editable.
     _solver_fields_touched = any(v is not None for v in
                                  (body.parameters, body.yaw_deg, body.pitch_deg, body.roll_deg))
-    if _solver_fields_touched and sim.status in (SimulationStatus.meshing, SimulationStatus.running):
+    if _solver_fields_touched and sim.status in (
+        SimulationStatus.scheduled, SimulationStatus.meshing,
+        SimulationStatus.running, SimulationStatus.done,
+    ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Cannot update a simulation that is currently running")
+                            detail="Cannot edit a simulation once it has been submitted")
 
     if body.name is not None:
         sim.name = body.name
