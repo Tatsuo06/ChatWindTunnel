@@ -31,6 +31,19 @@ def _show_geometry_3d(data: dict) -> None:
     except Exception:
         return
 
+    # Cap triangle count for the browser: a full-resolution STL (e.g. 600k+ tris)
+    # produces a huge Mesh3d JSON payload that freezes the WebGL renderer. A
+    # decimated preview is visually indistinguishable at this scale.
+    PREVIEW_MAX_FACES = 80000
+    if mesh.n_cells > PREVIEW_MAX_FACES:
+        try:
+            mesh = mesh.decimate_pro(
+                1.0 - PREVIEW_MAX_FACES / mesh.n_cells,
+                preserve_topology=False,
+            )
+        except Exception:
+            pass
+
     verts = mesh.points
     faces = mesh.faces.reshape(-1, 4)[:, 1:]
 
