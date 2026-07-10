@@ -1436,6 +1436,8 @@ with right:
                     else:
                         st.error(t("anim_not_available"))
                 if st.session_state.get(anim_cache_key):
-                    st.video(st.session_state[anim_cache_key])
+                    # loop + muted autoplay so the LES animation repeats on its own
+                    st.video(st.session_state[anim_cache_key],
+                             loop=True, autoplay=True, muted=True)
 
         _results_chat(sim_id, "chat_flow")
