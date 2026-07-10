@@ -1237,13 +1237,17 @@ with right:
 
     # ── Visualization ────────────────────────────
     with tab_flow:
-        _flow_live = (current_status in ("MESHING", "RUNNING")
-                      and sim.get("solver_type") == "UNSTEADY")
+        # Live cutting-plane mid-run for any solver: steady writes yNormal at each
+        # writeInterval, so the y=0 mesh (field="mesh") is viewable as soon as the
+        # solver has written its first output — no need to wait for the run to finish.
+        _flow_live = current_status in ("MESHING", "RUNNING")
         if not _is_done and not _flow_live:
             st.info(t("sim_pending_msg"))
         else:
             if _flow_live:
                 st.caption(t("flow_live_note"))
+                if st.button(t("refresh"), key="flow_refresh"):
+                    st.rerun()
             st.subheader(t("cutting_plane"))
             field_opts = [t("field_p"), t("field_u"), t("field_mesh")]
             field_map = {t("field_p"): "p", t("field_u"): "U", t("field_mesh"): "mesh"}
