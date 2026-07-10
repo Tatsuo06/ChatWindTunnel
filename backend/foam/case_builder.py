@@ -1003,7 +1003,9 @@ def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
 
     Rule: margin = 0.2 * max(dx, dy, dz) applied equally in all directions.
     This avoids overly tight boxes for elongated geometries.
-    Z min is clamped to 0 (ground plane).
+    Z min is clamped to 0 (ground plane). The Z ceiling is lifted to at least
+    the flow-direction length dx (= x1 - x0), so flat/long geometries still get a
+    tall enough refinement region to capture the wake/plume rising above them.
 
     Streamline sphere: placed just upstream of the front face, centred on the geometry's
     Y/Z centroid, with radius covering the frontal profile.
@@ -1026,7 +1028,7 @@ def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
     refbox_max = [
         round(x1 + pad, 3),
         round(y1 + pad, 3),
-        round(z1 + pad, 3),
+        round(max(z1 + pad, x1 - x0), 3),
     ]
 
     # Streamline sphere: centred on bounding-box centroid (= rotation centre)
