@@ -344,10 +344,13 @@ def get_cutting_plane_data(sim_id: int, field: str = "p") -> dict | None:
     return r.json() if r.ok else None
 
 
-def get_animation(sim_id: int, kind: str = "plane", field: str = "U") -> bytes | None:
-    # First request renders the video (~1-2 min for a full LES run)
+def get_animation(sim_id: int, kind: str = "plane", field: str = "U",
+                  force: bool = False) -> bytes | None:
+    # First request renders the video (~1-2 min for a full LES run).
+    # force=True re-pulls all frames from the cluster (a finished job's finish
+    # sync only brings its latest-time frame) and re-renders.
     r = _get(f"/simulations/{sim_id}/results/animation",
-             params={"kind": kind, "field": field}, timeout=600)
+             params={"kind": kind, "field": field, "force": force}, timeout=600)
     return r.content if r.ok else None
 
 

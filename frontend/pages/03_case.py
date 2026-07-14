@@ -1437,9 +1437,12 @@ with right:
                 anim_sel = st.selectbox(t("anim_kind"), list(anim_map.keys()), key="anim_kind")
                 anim_kind, anim_field = anim_map[anim_sel]
                 anim_cache_key = f"anim_{sim_id}_{anim_kind}_{anim_field}"
+                anim_force = st.checkbox(t("anim_force_refetch"), value=False, key="anim_force",
+                                         help=t("anim_force_refetch_help"))
                 if st.button(t("anim_generate"), key="anim_btn"):
                     with st.spinner(t("anim_generating")):
-                        video = api.get_animation(sim_id, kind=anim_kind, field=anim_field)
+                        video = api.get_animation(sim_id, kind=anim_kind, field=anim_field,
+                                                  force=anim_force)
                     if video:
                         st.session_state[anim_cache_key] = video
                     else:
