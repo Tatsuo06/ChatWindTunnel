@@ -1028,7 +1028,7 @@ def _refbox_from_rotated_stl(stl_path: Path, margin: float = 0.2) -> dict:
     refbox_max = [
         round(x1 + pad, 3),
         round(y1 + pad, 3),
-        round(max(z1 + pad, x1 - x0), 3),
+        round(max(z1 + pad, 0.5 * (x1 - x0)), 3),
     ]
 
     # Streamline sphere: centred on bounding-box centroid (= rotation centre)
