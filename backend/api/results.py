@@ -29,6 +29,28 @@ def _png(data: bytes) -> Response:
     return Response(content=data, media_type="image/png")
 
 
+async def _png_async(fn, *args, timeout: float = 45.0, **kwargs) -> Response:
+    """Render a plotly→PNG chart off the event loop with a hard timeout.
+
+    plotly's kaleido engine drives a headless Chrome that occasionally hangs on
+    launch/pipe. Calling the render inline (on the async event loop) let one such
+    hang wedge the ENTIRE backend indefinitely — every request, even /docs,
+    blocked. Running it in the default executor with asyncio.wait_for keeps the
+    loop free and turns a hang into a 504 on just this one chart request.
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        data = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: fn(*args, **kwargs)),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                            detail="Chart rendering timed out")
+    return _png(data)
+
+
 def _maybe_sync_live(sim, force: bool = False) -> None:
     """Pull solver logs + force coefficients from the cluster for a RUNNING job.
 
@@ -284,7 +306,7 @@ async def residuals(sim_id: int, current_user: CurrentUser, db: DB, phase: int |
         x_max = float(params.get("gas_end_time", params.get("les_end_time", 0)) or 0)
     else:  # LES phase 2 (or unspecified unsteady)
         x_max = float(params.get("les_end_time", 0) or 0)
-    return _png(backend.plot_residuals(log, x_max=x_max or None))
+    return await _png_async(backend.plot_residuals, log, x_max=x_max or None)
 
 
 @router.get("/force-coefficients")
@@ -332,10 +354,11 @@ async def force_coefficients(sim_id: int, current_user: CurrentUser, db: DB):
     # (it swings widely at emission and would otherwise squash the plot).
     yrange_ignore = ["Cz"] if params.get("gas_les") else None
 
-    return _png(backend.plot_force_coefficients(
+    return await _png_async(
+        backend.plot_force_coefficients,
         Path(sim.case_dir), only_last_phase=bool(sim.parent_id), phase_end=phase_end,
         single_x_max=single_x_max or None, single_x_title=single_x_title,
-        clamp_time=clamp_time, aero_anchor=aero_anchor, yrange_ignore=yrange_ignore))
+        clamp_time=clamp_time, aero_anchor=aero_anchor, yrange_ignore=yrange_ignore)
 
 
 @router.get("/cutting-plane")
