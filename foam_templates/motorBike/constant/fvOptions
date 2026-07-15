@@ -15,32 +15,10 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// Gas release point: injects normalized concentration (T) at a fixed rate.
-// Point coordinates and rate are rewritten by case_builder from
-// source_position / source_rate parameters.
-gasSource
-{
-    type            scalarSemiImplicitSource;
-    active          yes;
-
-    volumeMode      absolute;
-    selectionMode   points;
-
-    points
-    (
-        (0.0 0.0 1.0)
-    );
-
-    sources
-    {
-        T           (1.0 0);
-    }
-}
-
 // Runaway-flow guard: clips unphysical local velocity spikes that seed the
-// low-speed divergence feedback. The ceiling is rewritten by case_builder to
-// 4x the wind speed, outside any physical solution. Keep this entry BELOW
-// gasSource — case_builder rewrites the source block by first occurrence.
+// low-speed divergence feedback (local spike -> k production -> nut ->
+// pressure failure). The ceiling is rewritten by case_builder to 4x the wind
+// speed, outside any physical solution, so it only acts on numerical blow-up.
 limitU
 {
     type            limitVelocity;

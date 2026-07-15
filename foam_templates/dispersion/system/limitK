@@ -1,0 +1,18 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| Turbulence-energy guard for the steady solver: clips k every iteration.    |
+| The ceiling is rewritten by case_builder to 0.5*U^2 (wind speed U), far    |
+| above any physical turbulence level, so it only catches numerical blow-up. |
+| Removed by case_builder for models without a k field (SA, laminar).        |
+\*---------------------------------------------------------------------------*/
+limitK
+{
+    type            limitFields;
+    libs            (fieldFunctionObjects);
+    fields          (k);
+    max             200;
+    limit           max;
+    executeControl  timeStep;
+    writeControl    none;
+}
+
+// ************************************************************************* //

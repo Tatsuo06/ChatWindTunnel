@@ -421,6 +421,13 @@ def build_case(
             _apply_kepsilon(case_dir, "realizableKE")
         elif turb_model == "laminar":
             _apply_laminar(case_dir)
+        if turb_model in ("SpalartAllmaras", "laminar"):
+            _remove_limit_k(case_dir)
+
+    # Velocity-scaled runaway guards (limitU / limitK) — steady templates only
+    # (the legacy unsteady template has no fvOptions/limitK files).
+    if solver_type == SimulatorType.steady:
+        _write_stability_limits(case_dir, params)
 
     if is_dispersion and solver_type == SimulatorType.steady:
         params = _write_dispersion_props(case_dir, params, target_stl)
@@ -535,6 +542,17 @@ def build_les_restart_case(case_dir: Path, params: dict) -> Path:
     _write_les_control_dict(case_dir, params, src_dir=LES_FILES_KOSST)
     for fname in ("fvSchemes", "fvSolution"):
         shutil.copy2(LES_FILES_KOSST / fname, case_dir / "system" / f"{fname}.les")
+
+    # The steady parent's runaway guards must not clip resolved LES
+    # fluctuations: controlDict/fvSolution are swapped to .les versions anyway
+    # (dropping the limitK include), but constant/fvOptions is inherited by the
+    # copy — blank it so limitVelocity does not act on the LES.
+    fv_path = case_dir / "constant" / "fvOptions"
+    if fv_path.exists():
+        fv_path.write_text(
+            "FoamFile\n{\n    version     2.0;\n    format      ascii;\n"
+            "    class       dictionary;\n    location    \"constant\";\n"
+            "    object      fvOptions;\n}\n")
     tp_src = LES_FILES_KOSST / ("turbulenceProperties.IDDES" if les_model == "kOmegaSSTIDDES"
                                 else "turbulenceProperties")
     tp_content = _set_value(tp_src.read_text(), "LESModel", les_model)
@@ -741,6 +759,44 @@ def _turbulence_from_velocity(velocity: float, intensity: float = 0.05, lref: fl
     L = 0.07 * lref
     omega = (k ** 0.5) / (0.09 ** 0.25 * L)
     return round(k, 6), round(omega, 4)
+
+
+def _write_stability_limits(case_dir: Path, params: dict) -> None:
+    """Rewrite the velocity-scaled runaway guards (steady templates only):
+    limitVelocity ceiling = 4x wind speed (constant/fvOptions limitU) and a
+    k ceiling of 0.5*U^2 (system/limitK functionObject). Both sit far outside
+    any physical solution and only clip numerical blow-up — validated on the
+    0.5 m/s m5480 case, which diverged in the k->nut->pressure feedback loop
+    without them and converged to endTime with them."""
+    velocity = float(params.get("velocity_mps", 20.0))
+    u_max = round(4.0 * velocity, 6)
+    k_max = round(0.5 * velocity * velocity, 9)
+
+    fv_path = case_dir / "constant" / "fvOptions"
+    content = fv_path.read_text()
+    content, n = re.subn(r"(limitU\s*\{[^}]*?\bmax\s+)[^;]+(;)",
+                         rf"\g<1>{u_max}\g<2>", content, count=1, flags=re.DOTALL)
+    if n != 1:
+        raise ValueError("limitU max entry not found in constant/fvOptions")
+    fv_path.write_text(content)
+
+    limitk_path = case_dir / "system" / "limitK"
+    if limitk_path.exists():
+        content = limitk_path.read_text()
+        content, n = re.subn(r"(\bmax\s+)[^;]+(;)", rf"\g<1>{k_max}\g<2>",
+                             content, count=1)
+        if n != 1:
+            raise ValueError("max entry not found in system/limitK")
+        limitk_path.write_text(content)
+
+
+def _remove_limit_k(case_dir: Path) -> None:
+    """Drop the k-ceiling functionObject for models without a k field
+    (SpalartAllmaras, laminar) — limitFields on a missing field fails."""
+    ctrl_path = case_dir / "system" / "controlDict"
+    ctrl_path.write_text(
+        ctrl_path.read_text().replace('    #include "limitK"\n', ""))
+    (case_dir / "system" / "limitK").unlink(missing_ok=True)
 
 
 def _write_initial_conditions(case_dir: Path, params: dict) -> None:

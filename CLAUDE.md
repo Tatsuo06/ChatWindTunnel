@@ -119,6 +119,18 @@ Rotation is applied in `cad/converter.py:rotate_stl()` using scipy `Rotation.fro
 
 The geometry preview shows red/green/blue crosshair lines through the origin along the domain extents so users can verify their STL's coordinate placement before submitting a job.
 
+**Velocity-scaled divergence guards (all steady cases)**: Both steady templates carry runaway clips whose ceilings `case_builder._write_stability_limits()` rewrites from `velocity_mps` at build time — they sit far outside any physical solution, so they only stop numerical blow-up:
+
+```
+constant/fvOptions  limitU (limitVelocity):  max = 4 × U        (U = wind speed)
+system/limitK       functionObject limitFields on k:  max = 0.5 × U²
+```
+
+Relaxation factors are velocity-independent (dimensionless) and set conservatively in the templates (steady: U 0.5, k/ω 0.3) — the low relaxation carries the low-speed startup transient (ω blow-up at iteration ~10 with 0.9/0.7), the limits carry the later k→nut→pressure feedback (blow-up at iteration ~460 with lowered relaxation alone). Validated on the m5480 case at 0.5 m/s, which diverged both ways without them and completed with them; at 20 m/s the limits are inactive (physical |U|max ≈ 2–3×U, k ≈ 1.5(UI)² ≪ 0.5U²). Caveats:
+- `limitK` is removed by `_remove_limit_k()` for models without a k field (SpalartAllmaras, laminar) — `limitFields` on a missing field fails.
+- LES restarts must NOT clip resolved fluctuations: `build_les_restart_case` blanks the inherited `constant/fvOptions`; controlDict/fvSolution swap to `.les` versions anyway. Gas restarts overwrite fvOptions with the gas source.
+- ⚠️ `limitFields` is a **functionObject**, not an fvOption, in v2206 — putting it in fvOptions is a fatal "unknown option type" at solver startup.
+
 **Turbulence initial conditions (k and ω) are always derived from wind speed**: Do NOT store fixed k/ω values — they must be recomputed whenever `velocity_mps` or `lref` changes. The formula used (`case_builder._turbulence_from_velocity`):
 
 ```

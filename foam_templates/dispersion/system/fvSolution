@@ -94,8 +94,8 @@ relaxationFactors
     {
         U               0.3;
         T               0.5;
-        k               0.7;
-        omega           0.7;
+        k               0.3;
+        omega           0.3;
     }
 }
 
