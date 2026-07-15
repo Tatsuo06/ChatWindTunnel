@@ -380,6 +380,9 @@ async def cutting_plane(sim_id: int, field: str = "p", current_user: CurrentUser
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cutting plane data")
 
     geo_bounds = None
+    source_marker = None
+    scalar_offset = 0.0
+    scalar_title = None
     params_file = case_dir / "case_params.json"
     if params_file.exists():
         import json as _json
@@ -389,10 +392,28 @@ async def cutting_plane(sim_id: int, field: str = "p", current_user: CurrentUser
         if rb_min and rb_max:
             geo_bounds = {"xmin": rb_min[0], "xmax": rb_max[0],
                           "zmin": rb_min[2], "zmax": rb_max[2]}
+        # Show the gas release source on the concentration field of gas cases.
+        is_gas = bool(params.get("gas_les")) or params.get("case_type") == "dispersion"
+        conc_field = "GAS" if params.get("gas_les") else "T"
+        src = params.get("source_position")
+        if is_gas and field == conc_field and src:
+            source_marker = (src[0], src[2], float(params.get("source_radius", 0.0) or 0.0))
+        # Compressible gas cases carry T in Kelvin and absolute pressure (~1e5 Pa).
+        # Shift both to readable units so variations are visible: T->Celsius,
+        # p->gauge (relative to 1 atm). Dispersion's T is a concentration, not a
+        # temperature, so it is left untouched.
+        if params.get("gas_les"):
+            if field == "T":
+                scalar_offset, scalar_title = 273.15, "T [degC]"
+            elif field == "p":
+                scalar_offset, scalar_title = 101325.0, "p gauge [Pa]"
 
     stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
     return _png(backend.plot_cutting_plane(vtk_files[-1], field=field, geo_bounds=geo_bounds,
-                                           stl_path=stl_path if stl_path.exists() else None))
+                                           stl_path=stl_path if stl_path.exists() else None,
+                                           source_marker=source_marker,
+                                           scalar_offset=scalar_offset,
+                                           scalar_title=scalar_title))
 
 
 @router.get("/cutting-plane-data")

@@ -207,7 +207,11 @@ class PyVistaBackend(VisualizationBackend):
                            stl_path: Path | None = None,
                            clim: tuple | None = None,
                            time_label: str | None = None,
+                           source_marker: tuple | None = None,
+                           scalar_offset: float = 0.0,
+                           scalar_title: str | None = None,
                            return_array: bool = False):
+        import numpy as np
         mesh = pv.read(str(vtk_path))
         pl = pv.Plotter(off_screen=True, window_size=(1200, 600))
 
@@ -220,12 +224,26 @@ class PyVistaBackend(VisualizationBackend):
             scalars = (field if field in mesh.point_data
                        else field if field in mesh.cell_data
                        else mesh.array_names[0] if mesh.array_names else None)
+            # Optional unit shift for display (e.g. Kelvin->Celsius, absolute
+            # pressure->gauge). Store the shifted values under a display name so
+            # the scalar bar reads the intended units.
+            if scalar_offset and scalars in mesh.point_data:
+                disp = f"{scalars}_disp"
+                mesh[disp] = np.asarray(mesh.point_data[scalars]) - scalar_offset
+                scalars = disp
+                if clim is not None:
+                    clim = (clim[0] - scalar_offset, clim[1] - scalar_offset)
+            bar_args = {"title": scalar_title} if scalar_title else None
+            # Discrete (banded) colouring rather than a continuous gradient:
+            # n_colors quantises the lookup table into distinct contour bands.
             pl.add_mesh(
                 mesh,
                 scalars=scalars,
-                cmap="jet",
+                cmap="turbo",
                 clim=clim,
+                n_colors=16,
                 show_scalar_bar=True,
+                scalar_bar_args=bar_args,
             )
 
         # Overlay STL silhouette sliced at y=0 to show geometry outline
@@ -237,6 +255,28 @@ class PyVistaBackend(VisualizationBackend):
                     pl.add_mesh(slice_y, color="black", line_width=2.0)
             except Exception:
                 pass
+
+        # Overlay the gas release source (crosshair + sphere-radius circle) on the
+        # y=0 plane so the emission point is identifiable on the concentration field.
+        if source_marker:
+            sx, sz = source_marker[0], source_marker[1]
+            sr = source_marker[2] if len(source_marker) > 2 else 0.0
+            hl = max(sr * 1.6, 0.18)
+            # Magenta + tube-rendered lines stay visible over both the turbo
+            # field and the white geometry silhouette.
+            mk = dict(color="magenta", line_width=4.0, render_lines_as_tubes=True)
+            pl.add_mesh(pv.Line((sx - hl, 0.0, sz), (sx + hl, 0.0, sz)), **mk)
+            pl.add_mesh(pv.Line((sx, 0.0, sz - hl), (sx, 0.0, sz + hl)), **mk)
+            if sr > 0:
+                circle = pv.Polygon(center=(sx, 0.0, sz), radius=sr,
+                                    normal=(0, 1, 0), n_sides=96)
+                # Polygon is a filled disc; extract its boundary so only the ring
+                # is drawn (a wireframe disc shows internal triangulation spokes).
+                ring = circle.extract_feature_edges(boundary_edges=True,
+                                                    feature_edges=False,
+                                                    manifold_edges=False,
+                                                    non_manifold_edges=False)
+                pl.add_mesh(ring, **mk)
 
         if time_label:
             pl.add_text(time_label, position="upper_left", font_size=14, color="black")
