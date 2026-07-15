@@ -481,7 +481,10 @@ class PyVistaBackend(VisualizationBackend):
 
     def render_animation(self, case_dir: Path, kind: str = "plane", field: str = "U",
                          fps: int = 10, geo_bounds: dict | None = None,
-                         stl_path: "Path | None" = None) -> Path:
+                         stl_path: "Path | None" = None,
+                         source_marker: tuple | None = None,
+                         scalar_offset: float = 0.0,
+                         scalar_title: str | None = None) -> Path:
         """Render an MP4 of Phase-2 (LES) frames and return its path.
 
         kind="plane":       postProcessing/cuttingPlane/<t>/yNormal.vtp frames
@@ -540,7 +543,10 @@ class PyVistaBackend(VisualizationBackend):
                 self.plot_cutting_plane(
                     d / "yNormal.vtp", field=field, geo_bounds=geo_bounds,
                     stl_path=stl_path, clim=clim,
-                    time_label=f"t = {_tval(d):g} s", return_array=True,
+                    time_label=f"t = {_tval(d):g} s",
+                    source_marker=source_marker,
+                    scalar_offset=scalar_offset, scalar_title=scalar_title,
+                    return_array=True,
                 )
                 for d in frame_dirs
             ]

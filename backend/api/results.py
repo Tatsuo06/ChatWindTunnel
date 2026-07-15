@@ -379,41 +379,13 @@ async def cutting_plane(sim_id: int, field: str = "p", current_user: CurrentUser
     if not vtk_files:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No cutting plane data")
 
-    geo_bounds = None
-    source_marker = None
-    scalar_offset = 0.0
-    scalar_title = None
-    params_file = case_dir / "case_params.json"
-    if params_file.exists():
-        import json as _json
-        params = _json.loads(params_file.read_text())
-        rb_min = params.get("refbox_min")
-        rb_max = params.get("refbox_max")
-        if rb_min and rb_max:
-            geo_bounds = {"xmin": rb_min[0], "xmax": rb_max[0],
-                          "zmin": rb_min[2], "zmax": rb_max[2]}
-        # Show the gas release source on the concentration field of gas cases.
-        is_gas = bool(params.get("gas_les")) or params.get("case_type") == "dispersion"
-        conc_field = "GAS" if params.get("gas_les") else "T"
-        src = params.get("source_position")
-        if is_gas and field == conc_field and src:
-            source_marker = (src[0], src[2], float(params.get("source_radius", 0.0) or 0.0))
-        # Compressible gas cases carry T in Kelvin and absolute pressure (~1e5 Pa).
-        # Shift both to readable units so variations are visible: T->Celsius,
-        # p->gauge (relative to 1 atm). Dispersion's T is a concentration, not a
-        # temperature, so it is left untouched.
-        if params.get("gas_les"):
-            if field == "T":
-                scalar_offset, scalar_title = 273.15, "T [degC]"
-            elif field == "p":
-                scalar_offset, scalar_title = 101325.0, "p gauge [Pa]"
+    geo_bounds = _case_geo_bounds(case_dir)
+    gas_opts = _gas_display_opts(case_dir, field)
 
     stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
     return _png(backend.plot_cutting_plane(vtk_files[-1], field=field, geo_bounds=geo_bounds,
                                            stl_path=stl_path if stl_path.exists() else None,
-                                           source_marker=source_marker,
-                                           scalar_offset=scalar_offset,
-                                           scalar_title=scalar_title))
+                                           **gas_opts))
 
 
 @router.get("/cutting-plane-data")
@@ -501,6 +473,35 @@ def _case_geo_bounds(case_dir: Path) -> dict | None:
     return None
 
 
+def _gas_display_opts(case_dir: Path, field: str) -> dict:
+    """Cutting-plane display extras for gas cases: the release-source marker on
+    the concentration field, and Celsius/gauge unit shifts for compressible
+    gas_les temperature/pressure. Returns kwargs for plot_cutting_plane /
+    render_animation (empty when nothing applies)."""
+    params_file = case_dir / "case_params.json"
+    if not params_file.exists():
+        return {}
+    import json as _json
+    params = _json.loads(params_file.read_text())
+    opts: dict = {}
+
+    is_gas = bool(params.get("gas_les")) or params.get("case_type") == "dispersion"
+    conc_field = "GAS" if params.get("gas_les") else "T"
+    src = params.get("source_position")
+    if is_gas and field == conc_field and src:
+        opts["source_marker"] = (src[0], src[2],
+                                 float(params.get("source_radius", 0.0) or 0.0))
+
+    # Compressible gas cases carry T in Kelvin and absolute pressure (~1e5 Pa);
+    # shift to readable units. Dispersion's T is a concentration (left as-is).
+    if params.get("gas_les"):
+        if field == "T":
+            opts.update(scalar_offset=273.15, scalar_title="T [degC]")
+        elif field == "p":
+            opts.update(scalar_offset=101325.0, scalar_title="p gauge [Pa]")
+    return opts
+
+
 @router.get("/animation")
 async def animation(sim_id: int, kind: str = "plane", field: str = "U",
                     force: bool = False, current_user: CurrentUser = None, db: DB = None):
@@ -531,6 +532,8 @@ async def animation(sim_id: int, kind: str = "plane", field: str = "U",
 
     if force or not out_path.exists():
         geo_bounds = _case_geo_bounds(case_dir)
+        # Marker/units apply to the cutting-plane frames only, not streamlines.
+        gas_opts = _gas_display_opts(case_dir, field) if kind == "plane" else {}
         stl_path = case_dir / "constant" / "triSurface" / "motorBike.stl"
         try:
             out_path = await loop.run_in_executor(
@@ -538,6 +541,7 @@ async def animation(sim_id: int, kind: str = "plane", field: str = "U",
                 lambda: backend.render_animation(
                     case_dir, kind=kind, field=field, geo_bounds=geo_bounds,
                     stl_path=stl_path if stl_path.exists() else None,
+                    **gas_opts,
                 ),
             )
         except ValueError as e:
