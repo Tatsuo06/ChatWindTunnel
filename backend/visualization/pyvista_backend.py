@@ -279,7 +279,10 @@ class PyVistaBackend(VisualizationBackend):
                 pl.add_mesh(ring, **mk)
 
         if time_label:
-            pl.add_text(time_label, position="upper_left", font_size=14, color="black")
+            # White + shadow stays readable over the dark low end of the turbo
+            # field (black text vanished on concentration animations).
+            pl.add_text(time_label, position="upper_left", font_size=14,
+                        color="white", shadow=True)
 
         pl.add_axes()
         pl.view_xz()
@@ -461,7 +464,8 @@ class PyVistaBackend(VisualizationBackend):
                 pass
 
         if time_label:
-            pl.add_text(time_label, position="upper_left", font_size=14, color="black")
+            pl.add_text(time_label, position="upper_left", font_size=14,
+                        color="white", shadow=True)
 
         pl.add_axes()
         pl.view_xz()
