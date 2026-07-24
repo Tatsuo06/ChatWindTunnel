@@ -14,11 +14,21 @@ This project uses [uv](https://docs.astral.sh/uv/) for Python environment manage
 # Install / sync all dependencies (creates .venv automatically)
 uv sync --extra dev
 
-# Start backend (FastAPI)
-uv run uvicorn backend.main:app --reload --port 8000
+# Start both (foreground; Ctrl+C stops both) — or run the two commands below
+./start.sh
 
-# Start frontend (Streamlit)
+# Start backend (FastAPI)  ※ port 8000 to avoid conflict with ChatTowingTank (8001)
+# --reload-dir backend: editing frontend/ must NOT restart the backend — a restart
+# mid-flight waits for any in-progress background task (e.g. a local job or a
+# cluster submit) to finish before it can come back up, which looks like a UI freeze.
+uv run uvicorn backend.main:app --reload --reload-dir backend --port 8000
+
+# Start frontend (Streamlit)  ※ port 8501 to avoid conflict with ChatTowingTank (8502)
 uv run streamlit run frontend/app.py --server.port 8501
+
+# Stop / check (port-scoped; never touches the ChatTowingTank sibling)
+./stop.sh
+./check.sh
 
 # Run tests
 uv run pytest
