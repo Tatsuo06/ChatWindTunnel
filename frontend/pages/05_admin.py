@@ -43,11 +43,11 @@ st.divider()
 st.subheader(t("cluster_sync"))
 st.caption(t("cluster_sync_caption"))
 
-# Preview: count running/meshing jobs
+# Preview: count active sims in the DB (what the sync will actually check) —
+# includes SCHEDULED (reserved restart children held by Torque).
 summary = api.get_status_summary()
 n_running = (
-    summary.get("CLUSTER_RUNNING", 0)
-    or summary.get("RUNNING", 0) + summary.get("MESHING", 0)
+    summary.get("RUNNING", 0) + summary.get("MESHING", 0) + summary.get("SCHEDULED", 0)
 )
 
 # Estimate: ~3s per job for qstat SSH call + ~40s per job for result fetch (worst case all done)

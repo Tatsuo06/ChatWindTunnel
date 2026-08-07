@@ -116,22 +116,44 @@ def _assert_access(sim: Simulation, user):
 
 _SYNC_STATUS_MAP = {
     "PENDING": SimulationStatus.meshing,
+    "SCHEDULED": SimulationStatus.scheduled,
     "RUNNING": SimulationStatus.running,
     "DONE": SimulationStatus.done,
     "FAILED": SimulationStatus.failed,
 }
 
 
+async def _resolve_scheduled_child(sim: Simulation, raw: str, db) -> str | None:
+    """Resolve a reserved (held) child's status against its parent.
+
+    Torque drops a held child when its parent fails, so the child's job id
+    vanishes and qstat reads DONE — the same logic as jobs.poll_status.
+    Returns "failed" (parent failed ⇒ child failed), "keep" (transient qstat
+    miss — leave it reserved), or None (trust qstat normally).
+    """
+    if sim.status != SimulationStatus.scheduled or not sim.parent_id:
+        return None
+    parent = (await db.execute(
+        select(Simulation).where(Simulation.id == sim.parent_id))).scalar_one_or_none()
+    if parent and parent.status == SimulationStatus.failed:
+        return "failed"
+    if raw == "DONE" and (not parent or parent.status != SimulationStatus.done):
+        return "keep"
+    return None
+
+
 @router.get("/active-jobs", tags=["jobs"])
 async def list_active_jobs(current_user: CurrentUser, db: DB):
-    """Return all RUNNING/MESHING simulations with enough info for the sync UI."""
+    """Return all RUNNING/MESHING/SCHEDULED simulations with enough info for
+    the sync UI (SCHEDULED = reserved restart children held by Torque)."""
     if current_user.role != UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
 
     result = await db.execute(
         select(Simulation)
         .options(selectinload(Simulation.geometry).selectinload(Geometry.project))
-        .where(Simulation.status.in_([SimulationStatus.running, SimulationStatus.meshing]))
+        .where(Simulation.status.in_([SimulationStatus.running, SimulationStatus.meshing,
+                                      SimulationStatus.scheduled]))
     )
     sims = result.scalars().all()
     return [
@@ -175,7 +197,11 @@ async def sync_one_job(sim_id: int, current_user: CurrentUser, db: DB):
 
     try:
         raw = runner.status(sim.job_id)
-        new_status = _SYNC_STATUS_MAP.get(raw, SimulationStatus.running)
+        resolution = await _resolve_scheduled_child(sim, raw, db)
+        if resolution == "keep":
+            return {"sim_id": sim_id, "result": "no_change", "status": sim.status.value}
+        new_status = (SimulationStatus.failed if resolution == "failed"
+                      else _SYNC_STATUS_MAP.get(raw, SimulationStatus.running))
 
         if new_status == SimulationStatus.done and sim.case_dir:
             from backend.cluster.cluster_runner import _ssh as _cluster_ssh
@@ -190,6 +216,11 @@ async def sync_one_job(sim_id: int, current_user: CurrentUser, db: DB):
 
         if new_status != sim.status:
             old_status = sim.status.value
+            # Record start time when a reserved child is released and begins running.
+            if (sim.status == SimulationStatus.scheduled
+                    and new_status in (SimulationStatus.meshing, SimulationStatus.running)
+                    and not sim.started_at):
+                sim.started_at = datetime.now(timezone.utc)
             sim.status = new_status
             if new_status in (SimulationStatus.done, SimulationStatus.failed):
                 sim.finished_at = datetime.now(timezone.utc)
@@ -230,7 +261,8 @@ async def sync_cluster_jobs(current_user: CurrentUser, db: DB):
     result = await db.execute(
         select(Simulation)
         .options(selectinload(Simulation.geometry).selectinload(Geometry.project))
-        .where(Simulation.status.in_([SimulationStatus.running, SimulationStatus.meshing]))
+        .where(Simulation.status.in_([SimulationStatus.running, SimulationStatus.meshing,
+                                      SimulationStatus.scheduled]))
     )
     sims = result.scalars().all()
 
@@ -241,7 +273,11 @@ async def sync_cluster_jobs(current_user: CurrentUser, db: DB):
             continue
         try:
             raw = runner.status(sim.job_id)
-            new_status = _SYNC_STATUS_MAP.get(raw, SimulationStatus.running)
+            resolution = await _resolve_scheduled_child(sim, raw, db)
+            if resolution == "keep":
+                continue
+            new_status = (SimulationStatus.failed if resolution == "failed"
+                          else _SYNC_STATUS_MAP.get(raw, SimulationStatus.running))
 
             if new_status == SimulationStatus.done and sim.case_dir:
                 from backend.cluster.cluster_runner import _ssh as _cluster_ssh
@@ -256,6 +292,11 @@ async def sync_cluster_jobs(current_user: CurrentUser, db: DB):
 
             if new_status != sim.status:
                 old_status = sim.status
+                # Record start time when a reserved child is released and begins running.
+                if (sim.status == SimulationStatus.scheduled
+                        and new_status in (SimulationStatus.meshing, SimulationStatus.running)
+                        and not sim.started_at):
+                    sim.started_at = datetime.now(timezone.utc)
                 sim.status = new_status
                 if new_status in (SimulationStatus.done, SimulationStatus.failed):
                     sim.finished_at = datetime.now(timezone.utc)
