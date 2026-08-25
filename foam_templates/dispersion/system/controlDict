@@ -47,10 +47,17 @@ runTimeModifiable true;
 functions
 {
     #include "streamLines"
-    #include "wallBoundedStreamLines"
+    // Disabled: excluded from the results rsync (~280 MB/case), so the Results
+    // tab's wall-bounded streamlines are unavailable for cluster runs anyway.
+    // Re-enable this line (and the rsync excludes in cluster_runner.py) to use
+    // it — system/wallBoundedStreamLines is still present.
+    // #include "wallBoundedStreamLines"
     #include "cuttingPlane"
     #include "forceCoeffs"
-    #include "ensightWrite"
+    // Disabled: EnSight output is never read by ChatWindTunnel (visualization
+    // uses VTK/ + postProcessing/), but cost ~1.4 GB of cluster disk per case.
+    // Re-enable this line to write it (system/ensightWrite is still present).
+    // #include "ensightWrite"
     #include "limitK"
 }
 
