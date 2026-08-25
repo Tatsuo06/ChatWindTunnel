@@ -1,0 +1,96 @@
+direction: right
+
+title: |md
+  # ChatWindTunnel システム構成
+| {near: top-center}
+
+user: ユーザー {
+  shape: person
+}
+
+frontend: "Streamlit フロントエンド (:8501)" {
+  pages: "pages/" {
+    p1: "01_projects"
+    p2: "02_geometry"
+    p3: "03_case (Setup/Chat/Run)"
+    p4: "04_results (5タブ)"
+    p5: "05_admin"
+  }
+  api_client: "api_client.py\n(REST ラッパ)"
+  pages -> api_client
+}
+
+backend: "FastAPI バックエンド (:8000)" {
+  api: "api/ (REST)" {
+    auth: "auth (JWT)"
+    projects: "projects / geometries"
+    simulations: "simulations\n(CAD upload / 回転 / sync)"
+    jobs: "jobs\n(submit / restart / poll)"
+    chat: "chat"
+    results: "results (PNG)"
+  }
+
+  chat_agent: "chat/agent.py\nLiteLLM + 5ツール"
+  case_builder: "foam/case_builder.py\nテンプレート→ケース生成\n(ドメイン自動サイズ / k・ω導出)"
+  cad: "cad/converter.py\nSTEP/IGES→STL (cadquery)\nSTL回転 (scipy)"
+  viz: "visualization/\nPyVista描画 / plotly\nlogパーサ"
+  cluster: "cluster/" {
+    factory: "get_runner()"
+    local: "LocalRunner\n(subprocess)"
+    remote: "ClusterRunner\n(paramiko SSH + qsub)"
+    factory -> local: "CLUSTER_USER 空"
+    factory -> remote: "CLUSTER_USER 設定時"
+  }
+
+  api.chat -> chat_agent
+  api.jobs -> case_builder
+  api.jobs -> cluster
+  api.simulations -> cad
+  api.results -> viz
+}
+
+db: "DB\nSQLite (既定) / PostgreSQL" {
+  shape: cylinder
+}
+
+data: "data/ (ランタイム)" {
+  uploads: "uploads/\n(CAD原本+回転STL)"
+  cases: "cases/\n(OpenFOAMケース)"
+}
+
+templates: "foam_templates/" {
+  steady: "motorBike (simpleFoam)"
+  dispersion: "dispersion\n(buoyantBoussinesq)"
+  les: "lesFiles_kOmegaSST\n(DDES/IDDES restart)"
+  gas: "gasFiles\n(rhoReactingBuoyantFoam)"
+}
+
+llm: "LM Studio\n(ローカルLLM, OpenAI互換API)" {
+  shape: cloud
+}
+
+foam_local: "ローカル OpenFOAM v2206\n(Mac, テスト用)" {
+  shape: rectangle
+}
+
+pbs: "PBSクラスタ (Torque)" {
+  shape: rectangle
+  login: "ログインノード\nqsub / qstat / qdel"
+  nodes: "計算ノード vtNNN\n(16コア/ジョブ)"
+  storage: "/home3/e004/chatwt_cases\n(NFS/scp転送)"
+  login -> nodes: "ジョブ実行\n(-W depend=afterok で予約子)"
+  nodes -> storage: "結果書き込み"
+}
+
+user -> frontend: ブラウザ
+frontend.api_client -> backend.api: "REST + JWT"
+
+backend.api -> db: SQLAlchemy (async)
+backend.chat_agent -> llm: "LiteLLM"
+backend.case_builder -> templates: "コピー+書き換え"
+backend.case_builder -> data.cases
+backend.cad -> data.uploads
+backend.cluster.local -> foam_local: "Allrun 実行"
+backend.cluster.remote -> pbs.login: "SSH"
+backend.cluster.remote -> pbs.storage: "rsync\n(processor* 除外)"
+backend.viz -> data.cases: "VTK / log / 係数読取"
